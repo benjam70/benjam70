@@ -7,15 +7,19 @@ were added separately for the payment-forensics skill, which already names
 them among the gateways it investigates. Each is a thin wrapper over that
 system's public REST/GraphQL API using the official MCP Python SDK.
 
-Not every gateway the skill names gets a server here — Adyen was
-deliberately skipped. Global-e's Adyen integration is webhook-driven, not
-query-by-reference, so a live "look up this payment" MCP tool would either
-not work or would duplicate what Coralogix already has (see the skill's
-tool-grounding section for how that was verified). PayPal, by contrast, is
-a case where Global-e's own integration makes live outbound calls to
-PayPal's real API for refunds, and PayPal has genuine GET-by-ID endpoints
-for orders/captures/refunds/disputes — check before building, don't assume
-every gateway looks like Stripe.
+Not every gateway the skill names gets a server here — Adyen, Klarna, and
+Worldpay were all deliberately skipped after checking. Adyen and Klarna
+are both webhook-driven integrations at Global-e (Klarna's only outbound
+call, `ReadHPPSession`, is narrowly scoped to redirect finalization, same
+category as Adyen's `PaymentResultRequest`), so a live "look up this
+payment" MCP tool would either not work or would duplicate what Coralogix
+already has (see the skill's tool-grounding section for how that was
+verified for Adyen). Worldpay refunds are also webhook-driven, and its
+disputes arrive via a scheduled SFTP file drop, not any API — there's an
+internal HLD documenting this. PayPal and Stripe, by contrast, are cases
+where Global-e's own integration makes live outbound calls to the
+gateway's real API, and the gateway has genuine GET-by-ID endpoints — check
+before building, don't assume every gateway looks like Stripe.
 
 ## What's here
 
