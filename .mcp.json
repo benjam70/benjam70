@@ -1,0 +1,37 @@
+{
+  "mcpServers": {
+    "zendesk": {
+      "command": "python3",
+      "args": ["mcp-servers/zendesk/server.py"],
+      "env": {
+        "ZENDESK_SUBDOMAIN": "${ZENDESK_SUBDOMAIN}",
+        "ZENDESK_EMAIL": "${ZENDESK_EMAIL}",
+        "ZENDESK_API_TOKEN": "${ZENDESK_API_TOKEN}"
+      }
+    },
+    "datadog": {
+      "command": "python3",
+      "args": ["mcp-servers/datadog/server.py"],
+      "env": {
+        "DATADOG_API_KEY": "${DATADOG_API_KEY}",
+        "DATADOG_APP_KEY": "${DATADOG_APP_KEY}",
+        "DATADOG_SITE": "${DATADOG_SITE:-datadoghq.eu}"
+      }
+    },
+    "hubspot": {
+      "command": "python3",
+      "args": ["mcp-servers/hubspot/server.py"],
+      "env": {
+        "HUBSPOT_ACCESS_TOKEN": "${HUBSPOT_ACCESS_TOKEN}"
+      }
+    },
+    "monday": {
+      "command": "python3",
+      "args": ["mcp-servers/monday/server.py"],
+      "env": {
+        "MONDAY_API_TOKEN": "${MONDAY_API_TOKEN}",
+        "MONDAY_API_VERSION": "${MONDAY_API_VERSION:-2024-10}"
+      }
+    }
+  }
+}
