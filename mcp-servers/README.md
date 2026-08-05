@@ -1,23 +1,26 @@
-# MCP servers: Zendesk, Datadog, HubSpot, Monday.com
+# MCP servers: Zendesk, Datadog, HubSpot, Monday.com, Stripe
 
-Four small, read-only MCP servers, one per system, built to fill the gap
-between what the Neo AI web app can reach (all of these) and what this
-Claude Code session could reach before (none of these). Each is a thin
-wrapper over that system's public REST/GraphQL API using the official
-MCP Python SDK.
+Five small, read-only MCP servers, one per system. The first four fill the
+gap between what the Neo AI web app can reach (all of these) and what this
+Claude Code session could reach before (none of these). Stripe was added
+separately for the payment-forensics skill, which already names it as one
+of the five gateways it investigates. Each is a thin wrapper over that
+system's public REST/GraphQL API using the official MCP Python SDK.
 
 ## What's here
 
 ```
 mcp-servers/
-├── requirements.txt   shared deps for all four (mcp, httpx)
+├── requirements.txt   shared deps for all five (mcp, httpx)
 ├── zendesk/server.py  zendesk_search_tickets, zendesk_get_ticket
 ├── datadog/server.py  datadog_search_logs, datadog_query_metrics, datadog_list_monitors
 ├── hubspot/server.py  hubspot_search_crm, hubspot_get_object
-└── monday/server.py   monday_search_items, monday_get_item
+├── monday/server.py   monday_search_items, monday_get_item
+└── stripe/server.py   stripe_get_payment_intent, stripe_get_charge, stripe_search_charges,
+                        stripe_list_refunds, stripe_get_dispute
 ```
 
-All four are registered in `.mcp.json` at the repo root. Claude Code picks
+All five are registered in `.mcp.json` at the repo root. Claude Code picks
 that up automatically for sessions started in this repo.
 
 ## Setup
@@ -67,6 +70,13 @@ since)
 Avatar menu → Administration → Connections → API, or a personal token from
 your own Developer profile page if you don't have admin access.
 
+**Stripe** — `STRIPE_API_KEY`
+Dashboard → Developers → API keys → Create restricted key, scoped to
+**read-only** on Charges, PaymentIntents, Refunds, and Disputes only —
+nothing here needs write access, so don't hand it more than that. Use a
+restricted key, not the account's full secret key, so a leak or misuse is
+contained to exactly what these tools use.
+
 If you're not the admin for one of these systems, the request goes to
 whoever is — same escalation pattern as the BI team / Snowflake admin
 conversation earlier, just for a different system each time.
@@ -87,9 +97,15 @@ conversation earlier, just for a different system each time.
   fetch "all" results — that mirrors the existing Neo tools' pattern
   (`neo_search_kb`, `jira_search`, etc., which are also single-page,
   bounded searches) rather than open-ended bulk export.
-- **Smoke-tested, not integration-tested.** All four were verified to
+- **Smoke-tested, not integration-tested.** All five were verified to
   import cleanly and register their tools with the expected schemas using
-  dummy credentials. None have been run against real Zendesk / Datadog /
-  HubSpot / Monday tenants, since no real credentials were used or sought
-  out to build this. Sanity-check the first real call against each service
-  once credentials are in place.
+  dummy credentials. None have been run against a real Zendesk / Datadog /
+  HubSpot / Monday / Stripe account, since no real credentials were used
+  or sought out to build any of them. Sanity-check the first real call
+  against each service once credentials are in place.
+- **Stripe's API never returns full card numbers or CVVs**, by design —
+  the richest `stripe_get_charge` ever surfaces is brand/last4/funding and
+  AVS/CVC *check results* (match/no_match/unavailable). That's exactly the
+  fraud-signal evidence the payment-forensics skill's Mode A expects;
+  redaction for customer/merchant-facing output is that skill's Card Data
+  Guard, not this server's job.

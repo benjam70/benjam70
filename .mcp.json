@@ -32,6 +32,13 @@
         "MONDAY_API_TOKEN": "${MONDAY_API_TOKEN}",
         "MONDAY_API_VERSION": "${MONDAY_API_VERSION:-2024-10}"
       }
+    },
+    "stripe": {
+      "command": "python3",
+      "args": ["mcp-servers/stripe/server.py"],
+      "env": {
+        "STRIPE_API_KEY": "${STRIPE_API_KEY}"
+      }
     }
   }
 }
