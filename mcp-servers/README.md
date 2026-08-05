@@ -1,26 +1,38 @@
-# MCP servers: Zendesk, Datadog, HubSpot, Monday.com, Stripe
+# MCP servers: Zendesk, Datadog, HubSpot, Monday.com, Stripe, PayPal
 
-Five small, read-only MCP servers, one per system. The first four fill the
+Six small, read-only MCP servers, one per system. The first four fill the
 gap between what the Neo AI web app can reach (all of these) and what this
-Claude Code session could reach before (none of these). Stripe was added
-separately for the payment-forensics skill, which already names it as one
-of the five gateways it investigates. Each is a thin wrapper over that
+Claude Code session could reach before (none of these). Stripe and PayPal
+were added separately for the payment-forensics skill, which already names
+them among the gateways it investigates. Each is a thin wrapper over that
 system's public REST/GraphQL API using the official MCP Python SDK.
+
+Not every gateway the skill names gets a server here — Adyen was
+deliberately skipped. Global-e's Adyen integration is webhook-driven, not
+query-by-reference, so a live "look up this payment" MCP tool would either
+not work or would duplicate what Coralogix already has (see the skill's
+tool-grounding section for how that was verified). PayPal, by contrast, is
+a case where Global-e's own integration makes live outbound calls to
+PayPal's real API for refunds, and PayPal has genuine GET-by-ID endpoints
+for orders/captures/refunds/disputes — check before building, don't assume
+every gateway looks like Stripe.
 
 ## What's here
 
 ```
 mcp-servers/
-├── requirements.txt   shared deps for all five (mcp, httpx)
+├── requirements.txt   shared deps for all six (mcp, httpx)
 ├── zendesk/server.py  zendesk_search_tickets, zendesk_get_ticket
 ├── datadog/server.py  datadog_search_logs, datadog_query_metrics, datadog_list_monitors
 ├── hubspot/server.py  hubspot_search_crm, hubspot_get_object
 ├── monday/server.py   monday_search_items, monday_get_item
-└── stripe/server.py   stripe_get_payment_intent, stripe_get_charge, stripe_search_charges,
-                        stripe_list_refunds, stripe_get_dispute
+├── stripe/server.py   stripe_get_payment_intent, stripe_get_charge, stripe_search_charges,
+│                       stripe_list_refunds, stripe_get_dispute
+└── paypal/server.py   paypal_get_order, paypal_get_capture, paypal_get_refund,
+                        paypal_get_authorization, paypal_get_dispute, paypal_search_disputes
 ```
 
-All five are registered in `.mcp.json` at the repo root. Claude Code picks
+All six are registered in `.mcp.json` at the repo root. Claude Code picks
 that up automatically for sessions started in this repo.
 
 ## Setup
@@ -77,6 +89,16 @@ nothing here needs write access, so don't hand it more than that. Use a
 restricted key, not the account's full secret key, so a leak or misuse is
 contained to exactly what these tools use.
 
+**PayPal** — `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (`PAYPAL_ENV`
+optional, defaults to `live`)
+Developer Dashboard → Apps & Credentials → the REST API app tied to
+Global-e's actual PayPal business account (not a personal sandbox app —
+this needs to see real Global-e transactions) → Client ID and Secret.
+These tools only call GET endpoints, but the underlying app credential may
+also be capable of write actions depending on how it's scoped on PayPal's
+side, so if a read-only-scoped app is an option when generating it, prefer
+that.
+
 If you're not the admin for one of these systems, the request goes to
 whoever is — same escalation pattern as the BI team / Snowflake admin
 conversation earlier, just for a different system each time.
@@ -97,15 +119,25 @@ conversation earlier, just for a different system each time.
   fetch "all" results — that mirrors the existing Neo tools' pattern
   (`neo_search_kb`, `jira_search`, etc., which are also single-page,
   bounded searches) rather than open-ended bulk export.
-- **Smoke-tested, not integration-tested.** All five were verified to
+- **Smoke-tested, not integration-tested.** All six were verified to
   import cleanly and register their tools with the expected schemas using
   dummy credentials. None have been run against a real Zendesk / Datadog /
-  HubSpot / Monday / Stripe account, since no real credentials were used
-  or sought out to build any of them. Sanity-check the first real call
-  against each service once credentials are in place.
+  HubSpot / Monday / Stripe / PayPal account, since no real credentials
+  were used or sought out to build any of them. Sanity-check the first
+  real call against each service once credentials are in place.
 - **Stripe's API never returns full card numbers or CVVs**, by design —
   the richest `stripe_get_charge` ever surfaces is brand/last4/funding and
   AVS/CVC *check results* (match/no_match/unavailable). That's exactly the
   fraud-signal evidence the payment-forensics skill's Mode A expects;
   redaction for customer/merchant-facing output is that skill's Card Data
   Guard, not this server's job.
+- **PayPal only covers the V2 REST API integration.** Global-e also has a
+  legacy V1 (NVP) PayPal integration per the internal docs
+  (`PayPalController` vs `PayPalV2Controller`); transactions processed
+  through the legacy path before the V2 migration won't be reachable
+  through these tools. PayPal disputes are also worth calling out: they
+  route through their own dedicated path at Global-e, separate from the
+  Justt-based chargeback pipeline other gateways use, so
+  `paypal_get_dispute` / `paypal_search_disputes` are the only way to
+  reach that data from Claude Code — there's no Coralogix/Justt shortcut
+  for PayPal disputes the way there is for Adyen chargebacks.

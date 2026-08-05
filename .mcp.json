@@ -39,6 +39,15 @@
       "env": {
         "STRIPE_API_KEY": "${STRIPE_API_KEY}"
       }
+    },
+    "paypal": {
+      "command": "python3",
+      "args": ["mcp-servers/paypal/server.py"],
+      "env": {
+        "PAYPAL_CLIENT_ID": "${PAYPAL_CLIENT_ID}",
+        "PAYPAL_CLIENT_SECRET": "${PAYPAL_CLIENT_SECRET}",
+        "PAYPAL_ENV": "${PAYPAL_ENV:-live}"
+      }
     }
   }
 }
