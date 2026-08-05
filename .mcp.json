@@ -1,0 +1,53 @@
+{
+  "mcpServers": {
+    "zendesk": {
+      "command": "python3",
+      "args": ["mcp-servers/zendesk/server.py"],
+      "env": {
+        "ZENDESK_SUBDOMAIN": "${ZENDESK_SUBDOMAIN}",
+        "ZENDESK_EMAIL": "${ZENDESK_EMAIL}",
+        "ZENDESK_API_TOKEN": "${ZENDESK_API_TOKEN}"
+      }
+    },
+    "datadog": {
+      "command": "python3",
+      "args": ["mcp-servers/datadog/server.py"],
+      "env": {
+        "DATADOG_API_KEY": "${DATADOG_API_KEY}",
+        "DATADOG_APP_KEY": "${DATADOG_APP_KEY}",
+        "DATADOG_SITE": "${DATADOG_SITE:-datadoghq.eu}"
+      }
+    },
+    "hubspot": {
+      "command": "python3",
+      "args": ["mcp-servers/hubspot/server.py"],
+      "env": {
+        "HUBSPOT_ACCESS_TOKEN": "${HUBSPOT_ACCESS_TOKEN}"
+      }
+    },
+    "monday": {
+      "command": "python3",
+      "args": ["mcp-servers/monday/server.py"],
+      "env": {
+        "MONDAY_API_TOKEN": "${MONDAY_API_TOKEN}",
+        "MONDAY_API_VERSION": "${MONDAY_API_VERSION:-2024-10}"
+      }
+    },
+    "stripe": {
+      "command": "python3",
+      "args": ["mcp-servers/stripe/server.py"],
+      "env": {
+        "STRIPE_API_KEY": "${STRIPE_API_KEY}"
+      }
+    },
+    "paypal": {
+      "command": "python3",
+      "args": ["mcp-servers/paypal/server.py"],
+      "env": {
+        "PAYPAL_CLIENT_ID": "${PAYPAL_CLIENT_ID}",
+        "PAYPAL_CLIENT_SECRET": "${PAYPAL_CLIENT_SECRET}",
+        "PAYPAL_ENV": "${PAYPAL_ENV:-live}"
+      }
+    }
+  }
+}
