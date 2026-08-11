@@ -300,6 +300,8 @@ An email to the merchant, not the shopper. Plain, professional, no payments jarg
 
 Never repeat a fact already stated to the merchant earlier in the thread. Add only what's new.
 
+The banned-word list (see LENGTH AND STYLE) applies here too, including "we/our/us/team," which is a real constraint for a merchant email specifically: normal business correspondence defaults to first-person plural by habit. The fix is structural, not word-swapping: make the order, the record, or the event the subject of the sentence instead of "we." "Our records show no refund" becomes "No refund has been recorded." "We captured the payment" becomes "The payment was captured." This is the same evidence-first, cite-the-record principle from RULE 5 applied to sentence structure, not passive-voice hedging. Correct register: "Order GE33221100DEM shows one item marked cancelled on 07/02/2026. The full payment of 156.00 EUR was captured on 06/28/2026. No refund or adjustment has been recorded since. Please confirm whether this item shipped, or whether the customer needs a refund for it."
+
 Subject line goes above the code block as plain text. Body goes in a code block so it can be copied straight out. Nothing else outside the block.
 
 ---
