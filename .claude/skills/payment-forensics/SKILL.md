@@ -159,6 +159,12 @@ If a status doesn't clearly map (esp. Worldpay capture vs settlement), mark it `
 
 **Klarna dispute resolution is not a chargeback, and treating it like one is a real double-refund risk.** When Klarna resolves a dispute in the customer's favor, Klarna claws the money back directly from Global-e's own settlement account. No card network is involved, there's no chargeback reason code, and the representment process that applies to Adyen/Stripe/PayPal/Worldpay card chargebacks doesn't apply here. A Klarna customer-won dispute outcome maps to Reversal, never Chargeback. Never issue a separate refund after a Klarna dispute-won event: the clawback has already moved the funds, so a second refund double-pays the customer. This is specific to Klarna's own dispute process; it doesn't change how Adyen, Stripe, PayPal, or Worldpay chargebacks are handled.
 
+### CHARGEBACK LIABILITY: FRAUD VS SERVICE (who actually pays)
+
+A card chargeback's reason code decides who bears the cost, and that's a separate question from whether the chargeback happened. Global-e takes full liability only on chargebacks coded **Fraud**. Every other reason code is a **Service** chargeback and is passed to the merchant. Service reason codes break down into: Delivery (item not delivered), Return (refund expected following a return), Not as described (damaged/faulty/incorrect item), General (miscellaneous), and Processing disputes (duplicate charge, wrong amount). The reason code comes from the card issuer; it's the only data point that determines the split, not the chargeback amount, the merchant, or anything else in the case. If a case or merchant question turns on "who pays for this," check the reason code before answering, don't assume Fraud just because Global-e is handling the defense.
+
+This only applies to card chargebacks defended by Justt (Adyen, Stripe, Worldpay, and card-network disputes generally). PayPal and Klarna chargebacks aren't defended by Justt at all: they route to the Customer Support team, who gather evidence by reaching out to the merchant, customer, or carrier directly, a structurally different process from Justt's automated API-based representment. Don't assume the Fraud/Service liability split applies to a PayPal or Klarna dispute without checking; it's a card-chargeback-specific model.
+
 ---
 
 ## MODE A — THE INVESTIGATION (full version, for STANDARD/DEEP cases per the Complexity Gate — fill every slot)
@@ -303,6 +309,8 @@ Mechanical rules derived from these, not vibes:
 ## MODE C — MERCHANT EMAIL (only when asked)
 
 An email to the merchant, not the shopper. Plain, professional, no payments jargon (no "lifecycle", "terminal state", "reconciliation", "authority", "settled", "PSP", and no gateway names: not Adyen, Stripe, PayPal, Klarna, or Worldpay). Explain what happened and what you need from them or what they should do. Don't overstate certainty. Sentences under 20 words. Understandable on first read. Keep consistent register throughout. If it starts formal, stay formal; don't switch between "they should" and "please" mid-message. Only evidenced facts. No implied causation, no forward-looking statements, no reasoning embedded in the text.
+
+If a case involves a card chargeback being passed to the merchant, check the Fraud vs Service liability split (see CHARGEBACK LIABILITY above) before writing why. Don't tell a merchant a chargeback is theirs to bear without the reason code behind it, and don't apply that split to a PayPal or Klarna dispute.
 
 Never repeat a fact already stated to the merchant earlier in the thread. Add only what's new.
 
