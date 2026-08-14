@@ -238,6 +238,10 @@ A few recurring false alarms, worth ruling out before calling something a discre
 - **A refund smaller than the original charge** can be correct by policy when duty/tax was included in the original DDP price and excluded from the refund. Verify the policy before flagging a shortfall as unexplained.
 - **An out-of-stock item removed before capture** shows up in GE Admin as a refund, but it's a capture adjustment, not a customer-facing refund event. Check whether a gateway refund also exists before calling it one.
 
+Two failure patterns worth checking for directly, not false alarms, real gaps that produce real chargebacks:
+- **A cancelled order with no matching refund.** Cancellation (out of stock, invalid address, fraud check) and refund are two separate events; a cancellation record alone doesn't prove the payment was reversed. If a case involves a cancelled order, confirm a refund or void event actually exists for it before treating the money side as resolved. An order cancelled with no refund behind it is exactly the customer-never-got-the-item-or-the-money pattern that turns into a chargeback.
+- **A refund issued to a different tender than the original payment** (store credit or gift card instead of the original card, PayPal, etc.) is not equivalent to a refund for goods not delivered, regardless of amount matching. Check the refund's payment method against the original payment method, not just the amount, before calling a case resolved.
+
 ---
 
 ## SOURCE-TAG RULE (this is what stops made-up facts)
