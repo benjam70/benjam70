@@ -144,6 +144,10 @@ Universal events: Authorisation | Capture | Settlement | Refund | Chargeback | R
 |---|---|---|
 | Adyen | AUTHORISATION / CAPTURE / SETTLE_BATCH | Authorisation / Capture / Settlement |
 | Adyen | REFUND / CHARGEBACK / CHARGEBACK_REVERSED / CANCEL | Refund / Chargeback / Reversal / Void |
+| Adyen | `Lost` with explicit dispute/chargeback context (a dispute record, a chargeback field, not just the word itself) | Chargeback |
+| Adyen | `Won` with explicit dispute/chargeback context | Chargeback Reversal (underlying lifecycle, e.g. Settlement, is preserved) |
+| Adyen | `Pending` with explicit dispute context | Workflow only, not an outcome. Preserve the underlying lifecycle (usually Settlement) and downgrade confidence to Medium, don't treat it as Chargeback or as resolved |
+| Adyen | `Pending` as a plain payment status, no dispute context | Authorisation (unrelated to disputes) |
 | Stripe | payment_intent.succeeded / charge.captured / payout.paid | Authorisation / Capture / Settlement |
 | Stripe | charge.refunded / dispute.created / dispute.closed(won) / canceled | Refund / Chargeback / Reversal / Void |
 | PayPal | AUTHORIZATION / CAPTURE / payout / REFUNDED | Authorisation / Capture / Settlement / Refund |
@@ -156,6 +160,8 @@ Universal events: Authorisation | Capture | Settlement | Refund | Chargeback | R
 | Worldpay | CHARGEBACK / CHARGEBACK_REVERSED / CANCELLED | Chargeback / Reversal / Void |
 
 If a status doesn't clearly map (esp. Worldpay capture vs settlement), mark it `AMBIGUOUS — DATA GAP`. Never guess.
+
+**Adyen `Lost` and `Won` are ambiguous on their own and need dispute context to mean anything.** A bare `Lost` or `Won` in a log line or export, with nothing tying it to a dispute or chargeback record, is not evidence of a chargeback outcome. It could be an unrelated status, a mislabeled field, or genuinely undetermined. Don't default to reading `Lost` as a lost chargeback just because that's the more common case; without explicit dispute context, mark it `AMBIGUOUS — DATA GAP` like any other unmapped status, don't guess which way it resolves.
 
 **Klarna dispute resolution is not a chargeback, and treating it like one is a real double-refund risk.** When Klarna resolves a dispute in the customer's favor, Klarna claws the money back directly from Global-e's own settlement account. No card network is involved, there's no chargeback reason code, and the representment process that applies to Adyen/Stripe/PayPal/Worldpay card chargebacks doesn't apply here. A Klarna customer-won dispute outcome maps to Reversal, never Chargeback. Never issue a separate refund after a Klarna dispute-won event: the clawback has already moved the funds, so a second refund double-pays the customer. This is specific to Klarna's own dispute process; it doesn't change how Adyen, Stripe, PayPal, or Worldpay chargebacks are handled.
 
