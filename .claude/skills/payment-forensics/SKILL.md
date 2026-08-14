@@ -184,9 +184,9 @@ Variance: [explain the number, don't just state it. Where did any gap come from]
 
 **Data Gaps:** CRITICAL: __ | NON-CRITICAL: __
 
-**Terminal state of funds:** [ONE conclusion only. If a CRITICAL gap blocks it → Unknown]
+**Terminal state of funds:** [ONE conclusion only. If a CRITICAL gap or a CRITICAL contradiction blocks it → Unknown. A critical contradiction (amounts that don't chain, e.g. capture exceeding auth, or chronology that can't be true, e.g. refund before capture) blocks a confident answer the same way a critical gap does. Don't pick a state anyway because the rest of the evidence looks clean.]
 
-**Confidence:** HIGH / MEDIUM / PROVISIONAL / Unknown — [one line why]
+**Confidence:** HIGH / MEDIUM / PROVISIONAL / Unknown — [one line why]. An incomplete lifecycle (nothing past authorisation, or captured but not yet settled) caps confidence at MEDIUM even with zero contradictions and zero gaps. Being unresolved is itself a reason to not call it High, not something clean partial evidence can offset. HIGH requires a completed terminal event (settlement, refund, chargeback, or reversal) with no blocking contradiction.
 
 **Disproof check:** [what single piece of evidence would overturn this]
 
