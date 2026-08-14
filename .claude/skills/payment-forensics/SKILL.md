@@ -149,11 +149,15 @@ Universal events: Authorisation | Capture | Settlement | Refund | Chargeback | R
 | PayPal | AUTHORIZATION / CAPTURE / payout / REFUNDED | Authorisation / Capture / Settlement / Refund |
 | PayPal | DISPUTE opened / resolved seller favor / VOIDED | Chargeback / Reversal / Void |
 | Klarna | AUTHORIZED / CAPTURED / settlement report / REFUNDED | Authorisation / Capture / Settlement / Refund |
-| Klarna | KLA-04 (never Code 50) / dispute reversed / CANCELLED | Chargeback / Reversal / Void |
+| Klarna | KLA-04 (dispute opened) / CANCELLED | Chargeback (workflow only, not yet an outcome) / Void |
+| Klarna | dispute resolved customer-won (clawback) | Reversal — never Chargeback, see note below |
+| Klarna | dispute resolved merchant-won | Settlement (dispute closed, no fund movement) |
 | Worldpay | AUTHORISED / CAPTURED-or-SETTLED (verify batch) / REFUNDED | Authorisation / Capture-or-Settlement (flag) / Refund |
 | Worldpay | CHARGEBACK / CHARGEBACK_REVERSED / CANCELLED | Chargeback / Reversal / Void |
 
 If a status doesn't clearly map (esp. Worldpay capture vs settlement), mark it `AMBIGUOUS — DATA GAP`. Never guess.
+
+**Klarna dispute resolution is not a chargeback, and treating it like one is a real double-refund risk.** When Klarna resolves a dispute in the customer's favor, Klarna claws the money back directly from Global-e's own settlement account. No card network is involved, there's no chargeback reason code, and the representment process that applies to Adyen/Stripe/PayPal/Worldpay card chargebacks doesn't apply here. A Klarna customer-won dispute outcome maps to Reversal, never Chargeback. Never issue a separate refund after a Klarna dispute-won event: the clawback has already moved the funds, so a second refund double-pays the customer. This is specific to Klarna's own dispute process; it doesn't change how Adyen, Stripe, PayPal, or Worldpay chargebacks are handled.
 
 ---
 
@@ -196,6 +200,14 @@ Before diffing a charge against a refund or computing Outstanding, check whether
 
 A currency mismatch that isn't caught before reconciliation will produce a Variance line that looks like a real gap when it's actually an unconverted FX difference. Catching it here, not in the Finding, is what prevents that.
 
+### RECONCILIATION — SPLIT TENDER RULE (extends the Reconciliation line above)
+
+If an order was paid with more than one payment instrument (card plus gift card, card plus stored value, etc.), each instrument is its own independent lifecycle. Never merge amounts across instruments into a single Authorised/Captured/Refunded total: reconcile each leg separately, then combine only what's actually resolved. A refund or chargeback on one leg says nothing about the state of another leg on the same order. If the case data doesn't say which leg an event belongs to, that's a Data Gap, not something to assume from the total matching.
+
+### RECONCILIATION — LOW-VISIBILITY RAIL RULE
+
+Gift card, stored value, coupon/voucher, manual adjustments, and Global-e's own virtual gateway don't produce card-network evidence (no ARN, no network reference) even when everything worked correctly. Don't write "ARN missing" as a Data Gap or a red flag on a rail that never produces one; that absence is expected, not suspicious. These rails still need their own direct evidence of execution, a rail-specific confirmation or ledger entry, not just an admin record, before counting as CONFIRMED. An admin record alone on one of these rails, with nothing else behind it, stays a Data Gap.
+
 ---
 
 ## COMMON SENSE CHECK (silent, run before writing the Finding)
@@ -211,6 +223,14 @@ A plausible explanation is not a finding. If the data shows eleven SendOrderToMe
 Do not explain a stuck or missing status by inventing a mechanism. "Admin hasn't synced", "the webhook is delayed", "the batch will pick it up", "it'll settle overnight" are guesses about system behaviour, not evidence, and each has been wrong before. State only what the record shows (the status, the date, the absence of a PSP reference or capture event). If a documented cause exists, cite it (the ExemptionRequested-stuck behaviour is tracked as bug CORE-213271, not a sync lag). If no documented cause exists, the status is unresolved and that is the finding. Never assert a timeline for something resolving on its own.
 
 Evidence first, conclusion after. Never open with the conclusion and backfill. Never state a forward-looking guarantee ("the order will not ship") unless a specific evidenced action makes it true.
+
+A confirmed refund event is evidence of refund execution, not proof the customer received or saw the funds. A gateway refund confirmation, a capture-side settlement, and a customer's bank actually posting the credit are three separate claims, don't collapse them into one. If the evidence only covers execution (a gateway refund event, an ARN), say the refund was executed and stop there. Whether it landed on the customer's statement is a separate, often unavailable fact, something to ask the analyst to confirm, not something to assert as done. This is why the Mode B calibration below tells the analyst to confirm with the customer whether the refund appeared on their statement, rather than asserting that it did.
+
+A few recurring false alarms, worth ruling out before calling something a discrepancy:
+- **The same amount showing in two currencies** can be one transaction under dynamic currency conversion, not two separate charges.
+- **An unfamiliar merchant name on a statement** is often Global-e's own name appearing as merchant of record, not evidence of an unauthorized charge.
+- **A refund smaller than the original charge** can be correct by policy when duty/tax was included in the original DDP price and excluded from the refund. Verify the policy before flagging a shortfall as unexplained.
+- **An out-of-stock item removed before capture** shows up in GE Admin as a refund, but it's a capture adjustment, not a customer-facing refund event. Check whether a gateway refund also exists before calling it one.
 
 ---
 
