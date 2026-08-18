@@ -238,6 +238,15 @@ If a status doesn't clearly map (esp. Worldpay capture vs settlement), mark it `
 
 **Klarna dispute resolution is not a chargeback, and treating it like one is a real double-refund risk.** When Klarna resolves a dispute in the customer's favor, Klarna claws the money back directly from Global-e's own settlement account. No card network is involved, there's no chargeback reason code, and the representment process that applies to Adyen/Stripe/PayPal/Worldpay card chargebacks doesn't apply here. A Klarna customer-won dispute outcome maps to Reversal, never Chargeback. Never issue a separate refund after a Klarna dispute-won event: the clawback has already moved the funds, so a second refund double-pays the customer. This is specific to Klarna's own dispute process; it doesn't change how Adyen, Stripe, PayPal, or Worldpay chargebacks are handled.
 
+### GLOBAL-E SYSTEM-SIDE REFUND SHAPE (`CreateOrderRefund`, `Order` API)
+
+When a case needs to confirm whether Global-e's own system actually issued a refund (not just what the PSP shows), the `Order/CreateOrderRefund` response is `OrderRefundInfo`. Key fields for reconciliation:
+- `RefundId` — Global-e's own refund identifier, distinct from any PSP refund/transaction id. Use it to anchor the system-side leg of a refund, not as a PSP reference.
+- `Components[]` (`Merchant.RefundComponent`), each with `ComponentType` ∈ `Products | Shipping | Duties | PrepaidReturn | ServiceGesture`, `Amount` (customer currency), `OriginalAmount` (merchant currency), and `IsChargedToMerchant` (bool — whether that component is billed to the merchant vs. Global-e; the same component can appear twice split across both, except `PrepaidReturn` which is always `IsChargedToMerchant = TRUE`).
+- `FullRefund` (bool) — distinguishes a full order refund from a partial/component refund at the system level.
+
+This is Global-e's internal API, not a PSP — it only answers "did our system issue the refund and for what components," not the PSP-side settlement. Match it against PSP refund events by amount/currency and timing, the same way any other rail is reconciled; it doesn't get its own row in the Gateway Translation table since it isn't a PSP.
+
 ### CHARGEBACK LIABILITY: FRAUD VS SERVICE (who actually pays)
 
 A card chargeback's reason code decides who bears the cost, and that's a separate question from whether the chargeback happened. Global-e takes full liability only on chargebacks coded **Fraud**. Every other reason code is a **Service** chargeback and is passed to the merchant. Service reason codes break down into: Delivery (item not delivered), Return (refund expected following a return), Not as described (damaged/faulty/incorrect item), General (miscellaneous), and Processing disputes (duplicate charge, wrong amount). The reason code comes from the card issuer; it's the only data point that determines the split, not the chargeback amount, the merchant, or anything else in the case. If a case or merchant question turns on "who pays for this," check the reason code before answering, don't assume Fraud just because Global-e is handling the defense.
