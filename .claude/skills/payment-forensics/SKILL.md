@@ -150,6 +150,8 @@ If a timestamp's timezone cannot be determined from the source, do not guess it 
 
 This check runs before FAST-case sizing too: a "before/after" question resting on an unresolved timezone gap is a STANDARD case, not FAST, regardless of how few events are involved.
 
+**Date format, every output, every Mode:** write dates `DD/MM/YYYY` (e.g. `28/07/2026`), never `YYYY-MM-DD`. This applies to the Timeline table, Mode A prose, Mode B, and Mode C alike. Keep full timestamps (with time and timezone) in `DD/MM/YYYY HH:MM` form when the time matters, e.g. `28/07/2026 18:44 UTC`; don't drop back to ISO order just because a source tag or a log line quoted the timestamp in `YYYY-MM-DD` form, convert it before writing it into the output.
+
 ---
 
 ## RULE 2 — INFER THE QUESTION, DON'T ASK
