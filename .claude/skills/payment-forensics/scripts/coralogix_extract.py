@@ -39,27 +39,25 @@ def main():
     ap.add_argument("--regex", action="store_true", help="treat pattern as a regex instead of a literal substring")
     args = ap.parse_args()
 
-    with open(args.file, "r", errors="replace") as f:
-        lines = f.readlines()
-
     needle = args.pattern if args.regex else re.escape(args.pattern)
     pattern = re.compile(needle, re.IGNORECASE)
     ts_pattern = re.compile(r'"key":"timestamp","value":"([^"]+)"')
 
     total = 0
-    for line_no, line in enumerate(lines):
-        ts_match = ts_pattern.search(line)
-        ts = ts_match.group(1) if ts_match else None
-        for m in pattern.finditer(line):
-            if total >= args.max:
-                print(f"\n... stopped at --max {args.max} matches, re-run with a narrower pattern or higher --max", file=sys.stderr)
-                return
-            start = max(0, m.start() - args.context)
-            end = min(len(line), m.end() + args.context)
-            total += 1
-            print(f"---MATCH--- line={line_no} timestamp={ts}")
-            print(line[start:end])
-            print()
+    with open(args.file, "r", errors="replace") as f:
+        for line_no, line in enumerate(f):
+            ts_match = ts_pattern.search(line)
+            ts = ts_match.group(1) if ts_match else None
+            for m in pattern.finditer(line):
+                if total >= args.max:
+                    print(f"\n... stopped at --max {args.max} matches, re-run with a narrower pattern or higher --max", file=sys.stderr)
+                    return
+                start = max(0, m.start() - args.context)
+                end = min(len(line), m.end() + args.context)
+                total += 1
+                print(f"---MATCH--- line={line_no} timestamp={ts}")
+                print(line[start:end])
+                print()
 
     if total == 0:
         print(f"No matches for {args.pattern!r} in {args.file}", file=sys.stderr)
