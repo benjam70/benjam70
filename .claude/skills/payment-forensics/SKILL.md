@@ -240,7 +240,11 @@ If a status doesn't clearly map (esp. Worldpay capture vs settlement), mark it `
 
 ### GLOBAL-E SYSTEM-SIDE REFUND SHAPE (`CreateOrderRefund`, `Order` API)
 
-When a case needs to confirm whether Global-e's own system actually issued a refund (not just what the PSP shows), the `Order/CreateOrderRefund` response is `OrderRefundInfo`. Key fields for reconciliation:
+When a case needs to confirm whether Global-e's own system actually issued a refund (not just what the PSP shows), the `Order/CreateOrderRefund` response is `OrderRefundInfo`. **Check the envelope before reading anything else:** this endpoint returns HTTP 200 for both a successful refund and a processing error, so a 200 status code alone proves nothing. Read the top-level `Success` field first.
+- `Success: false` — the refund call failed to process. `NotifyOrderRefund` is `null` on this path; there is no `RefundId` to cite. This is an evidenced failure, source-tag it as such (`[Global-e: CreateOrderRefund, Success: false]`), don't write it up as an unexplained Data Gap and don't treat the absence of a `RefundId` as proof the refund simply hasn't happened yet.
+- `Success: true` — the refund fields live under `NotifyOrderRefund`. Only read `RefundId`/`Components`/`FullRefund` once `Success` is confirmed `true`; reading them without checking `Success` first risks either treating a `null` as an unexplained gap or, worse, misreading stale/default field values on an error response as an issued refund.
+
+Fields under `NotifyOrderRefund` on a `Success: true` response, key for reconciliation:
 - `RefundId` — Global-e's own refund identifier, distinct from any PSP refund/transaction id. Use it to anchor the system-side leg of a refund, not as a PSP reference.
 - `Components[]` (`Merchant.RefundComponent`), each with `ComponentType` ∈ `Products | Shipping | Duties | PrepaidReturn | ServiceGesture`, `Amount` (customer currency), `OriginalAmount` (merchant currency), and `IsChargedToMerchant` (bool — whether that component is billed to the merchant vs. Global-e; the same component can appear twice split across both, except `PrepaidReturn` which is always `IsChargedToMerchant = TRUE`).
 - `FullRefund` (bool) — distinguishes a full order refund from a partial/component refund at the system level.
