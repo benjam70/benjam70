@@ -42,6 +42,12 @@ command = "python3"
 args = ["mcp-servers/stripe/server.py"]
 env_vars = ["STRIPE_API_KEY"]
 
+[mcp_servers.stripe.tools.stripe_get_payment_intent]
+approval_mode = "approve"
+
+[mcp_servers.stripe.tools.stripe_list_refunds]
+approval_mode = "approve"
+
 [mcp_servers.zendesk]
 command = "python3"
 args = ["mcp-servers/zendesk/server.py"]
