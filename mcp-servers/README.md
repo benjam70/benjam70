@@ -21,6 +21,29 @@ where Global-e's own integration makes live outbound calls to the
 gateway's real API, and the gateway has genuine GET-by-ID endpoints — check
 before building, don't assume every gateway looks like Stripe.
 
+## Coralogix is not one of these six, and this repo cannot register it
+
+The payment-forensics skill treats `mcp__Coralogix__query_dataprime` as required
+reading on nearly every case. That tool is **not provisioned by this repo** —
+unlike the six servers below, it's not a local Python script this project owns
+and registers in `.mcp.json` with a credential env var. It's a directly-connected,
+hosted MCP server, the same category as the built-in `mcp__Neo__*` tools: something
+the Claude Code environment grants at the account/session level, outside any config
+checked into this repository.
+
+That means a session running with only this repo's own `.mcp.json` and
+`.claude/settings.json`, with no other grant, will **not** have
+`mcp__Coralogix__*` available — there is nothing here to add that would fix
+that, the same way there's nothing here that makes `mcp__Neo__*` appear. If a
+session is missing it, that's an environment/connector question for whoever
+administers Claude Code for this account, not a credential request against
+this repo (contrast with the "Getting credentials" section below, which does
+apply to the six servers here). The skill's own tool-grounding section already
+says to confirm the tool resolves before relying on it rather than assuming
+it's present, precisely because of this gap; if it's absent, report it as the
+"no matching tool found" case documented there, not as a data-doesn't-exist
+finding.
+
 ## What's here
 
 ```
