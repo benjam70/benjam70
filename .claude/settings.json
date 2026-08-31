@@ -1,4 +1,10 @@
 {
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Bash commands that run, restart, or syntax-check mcp-servers/admin/server.py (the GE Admin MCP server), including its use of browser_cookie3 to read live GE Admin session cookies from the user's own already-logged-in Edge browser profile. This specific use was explicitly reviewed and approved by the user and security (see mcp-servers/requirements.txt comment on the browser_cookie3 line) and is not credential exfiltration. Do not extend this allowance to any other file, any other cookie/credential-reading library or call, or any other browser profile/user."
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

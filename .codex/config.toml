@@ -1,0 +1,78 @@
+[mcp_servers.coralogix]
+command = "python3"
+args = ["mcp-servers/coralogix/server.py"]
+env_vars = [
+    "CORALOGIX_API_KEY",
+    "CORALOGIX_DOMAIN",
+]
+
+[mcp_servers.datadog]
+command = "python3"
+args = ["mcp-servers/datadog/server.py"]
+env_vars = [
+    "DATADOG_API_KEY",
+    "DATADOG_APP_KEY",
+    "DATADOG_SITE",
+]
+
+[mcp_servers.hubspot]
+command = "python3"
+args = ["mcp-servers/hubspot/server.py"]
+env_vars = ["HUBSPOT_ACCESS_TOKEN"]
+
+[mcp_servers.monday]
+command = "python3"
+args = ["mcp-servers/monday/server.py"]
+env_vars = [
+    "MONDAY_API_TOKEN",
+    "MONDAY_API_VERSION",
+]
+
+[mcp_servers.paypal]
+command = "python3"
+args = ["mcp-servers/paypal/server.py"]
+env_vars = [
+    "PAYPAL_CLIENT_ID",
+    "PAYPAL_CLIENT_SECRET",
+    "PAYPAL_ENV",
+]
+
+[mcp_servers.stripe]
+command = "python3"
+args = ["mcp-servers/stripe/server.py"]
+env_vars = ["STRIPE_API_KEY"]
+
+[mcp_servers.zendesk]
+command = "python3"
+args = ["mcp-servers/zendesk/server.py"]
+env_vars = [
+    "ZENDESK_SUBDOMAIN",
+    "ZENDESK_EMAIL",
+    "ZENDESK_API_TOKEN",
+]
+
+[mcp_servers.admin]
+# This Codex install's bundled SDK can't load a bare `url` entry at
+# all — any url-type mcp_servers entry fails the ENTIRE config.toml,
+# not just this one (confirmed directly: "url is not supported for
+# stdio" against an unrelated entry, a misleading error, but a real
+# hard block). Bridged via mcp-remote instead (confirmed working:
+# it connects to http://127.0.0.1:8765/mcp over StreamableHTTP and
+# proxies stdio<->HTTP), so this now points at the SAME shared
+# admin/server.py instance and browser/login session Claude Code
+# uses via .mcp.json, rather than spawning an independent copy.
+# Requires the shared server to already be running on 127.0.0.1:8765
+# (started separately, e.g. by Claude Code) before Codex connects.
+command = "npx"
+args = ["-y", "mcp-remote", "http://127.0.0.1:8765/mcp"]
+
+[mcp_servers.admin.tools.admin_get_order]
+approval_mode = "approve"
+
+[mcp_servers.admin.tools.admin_get_order_full]
+approval_mode = "approve"
+
+[mcp_servers.disputes]
+command = "python3"
+args = ["mcp-servers/disputes/server.py"]
+env_vars = ["GLOBALE_DISPUTES_PROFILE_DIR"]
