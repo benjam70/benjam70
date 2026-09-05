@@ -1,0 +1,24 @@
+// Merge this into theme.extend.colors in your Tailwind config.
+module.exports = {
+  dudley: {
+    navy: "#0B2540",
+    teal: "#00C6B8",
+    aqua: "#7EE3E3",
+    cream: "#FAF7EE",
+    sand: "#EBDCC6",
+    slate: "#64748B",
+    bg: "#071724",
+    sidebar: "#082033",
+    panel: "#0E2436",
+    "panel-alt": "#122C40",
+    border: "#1C3B50",
+    text: "#F7FAFC",
+    muted: "#94A3B8",
+    input: "#102A3D",
+    active: "#00C6B8",
+    success: "#10B981",
+    warning: "#F59E0B",
+    danger: "#EF4444",
+    info: "#38BDF8",
+  },
+};

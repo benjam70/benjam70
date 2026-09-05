@@ -1,0 +1,56 @@
+:root {
+  /* Dudley core brand */
+  --dudley-navy: #0B2540;
+  --dudley-teal: #00C6B8;
+  --dudley-aqua: #7EE3E3;
+  --dudley-cream: #FAF7EE;
+  --dudley-sand: #EBDCC6;
+  --dudley-slate: #64748B;
+
+  /* Dudley dark command-center UI */
+  --dudley-bg: #071724;
+  --dudley-sidebar: #082033;
+  --dudley-panel: #0E2436;
+  --dudley-panel-alt: #122C40;
+  --dudley-border: #1C3B50;
+  --dudley-text: #F7FAFC;
+  --dudley-text-muted: #94A3B8;
+  --dudley-input: #102A3D;
+
+  /* Semantic/status colors */
+  --dudley-active: #00C6B8;
+  --dudley-success: #10B981;
+  --dudley-warning: #F59E0B;
+  --dudley-danger: #EF4444;
+  --dudley-info: #38BDF8;
+}
+
+/* Suggested surfaces */
+.dudley-app {
+  background: var(--dudley-bg);
+  color: var(--dudley-text);
+}
+
+.dudley-sidebar {
+  background: var(--dudley-sidebar);
+  border-right: 1px solid var(--dudley-border);
+}
+
+.dudley-panel {
+  background: var(--dudley-panel);
+  border: 1px solid var(--dudley-border);
+}
+
+.dudley-panel-alt {
+  background: var(--dudley-panel-alt);
+}
+
+.dudley-active {
+  color: var(--dudley-active);
+}
+
+.dudley-input {
+  background: var(--dudley-input);
+  border: 1px solid var(--dudley-border);
+  color: var(--dudley-text);
+}
