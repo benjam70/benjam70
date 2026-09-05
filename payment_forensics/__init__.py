@@ -19,7 +19,7 @@ from .mcp_stdio import MCPServerSpec, MCPStdioSearchExecutor
 from .output_validator import OutputValidation, validate_claims, validate_output
 from .vale_linter import ValeResult, run_vale
 from .audit import build_audit_record, explain_replay_difference
-from .integrity import IntegrityResult, check_startup_integrity
+from .integrity import HostStatus, IntegrityResult, check_host_integration, check_startup_integrity
 from .regression import RegressionResult, run_cross_model_regression
 from .safety import normalize_timestamp, redact_sensitive
 from .retrieval import BGEEmbedder, BGEReranker, CandidateDocument, HybridCandidateIndex, RankedCandidate
@@ -69,6 +69,8 @@ __all__ = [
     "explain_replay_difference",
     "IntegrityResult",
     "check_startup_integrity",
+    "HostStatus",
+    "check_host_integration",
     "RegressionResult",
     "run_cross_model_regression",
     "normalize_timestamp",
