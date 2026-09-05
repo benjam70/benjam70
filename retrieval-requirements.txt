@@ -1,0 +1,5 @@
+# Optional local Hugging Face retrieval stack. The core engine works without it.
+sentence-transformers>=3.0
+FlagEmbedding>=1.3
+# Optional claim-consistency checker; never loaded unless explicitly enabled.
+transformers>=4.40

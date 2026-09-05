@@ -1,0 +1,7 @@
+extends: existence
+message: "Avoid banned Mode B/C wording: '%s'."
+level: error
+ignorecase: true
+tokens:
+  - '\b(?:we|our|us|team|should|successfully|sorry|soon|appreciate|reached out|escalated|will follow up)\b'
+  - '\b(?:Adyen|Stripe|PayPal|Klarna|Worldpay)\b'

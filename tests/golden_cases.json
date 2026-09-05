@@ -1,0 +1,5 @@
+[
+  {"id": "B-refund", "mode": "B", "tier": "FAST", "required": ["date", "refund", "reference", "no-new-facts"]},
+  {"id": "C-merchant", "mode": "C", "tier": "STANDARD", "required": ["subject", "plain-language", "no-gateway", "no-new-facts"]},
+  {"id": "A-conflict", "mode": "A", "tier": "STANDARD", "required": ["timeline", "contradiction", "terminal-state"]}
+]
