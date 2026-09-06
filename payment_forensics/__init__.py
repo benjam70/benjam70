@@ -19,6 +19,7 @@ from .mcp_stdio import MCPServerSpec, MCPStdioSearchExecutor
 from .output_validator import OutputValidation, validate_claims, validate_output
 from .vale_linter import ValeResult, run_vale
 from .grammar import GrammarResult, run_grammar_check
+from .slop_check import SlopCheckResult, run_slop_check
 from .relevance import CrossEncoderRelevanceChecker, RelevanceResult
 from .audit import build_audit_record, explain_replay_difference
 from .integrity import HostStatus, IntegrityResult, check_host_integration, check_startup_integrity
@@ -69,6 +70,8 @@ __all__ = [
     "run_vale",
     "GrammarResult",
     "run_grammar_check",
+    "SlopCheckResult",
+    "run_slop_check",
     "CrossEncoderRelevanceChecker",
     "RelevanceResult",
     "build_audit_record",
