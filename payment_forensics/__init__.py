@@ -18,6 +18,8 @@ from .adapters import JsonProposalModel, OpenAIResponsesModel, RegistrySearchExe
 from .mcp_stdio import MCPServerSpec, MCPStdioSearchExecutor
 from .output_validator import OutputValidation, validate_claims, validate_output
 from .vale_linter import ValeResult, run_vale
+from .grammar import GrammarResult, run_grammar_check
+from .relevance import CrossEncoderRelevanceChecker, RelevanceResult
 from .audit import build_audit_record, explain_replay_difference
 from .integrity import HostStatus, IntegrityResult, check_host_integration, check_startup_integrity
 from .regression import RegressionResult, run_cross_model_regression
@@ -65,6 +67,10 @@ __all__ = [
     "validate_output",
     "ValeResult",
     "run_vale",
+    "GrammarResult",
+    "run_grammar_check",
+    "CrossEncoderRelevanceChecker",
+    "RelevanceResult",
     "build_audit_record",
     "explain_replay_difference",
     "IntegrityResult",
