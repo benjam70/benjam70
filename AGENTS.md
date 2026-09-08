@@ -41,6 +41,33 @@ behavior:
   `ProposalModel` implementation (see `payment_forensics/adapters.py`), never
   a reason to fork the engine or the skill text.
 
+## Loop prevention
+
+`HybridEngine`/`CaseController` enforce these automatically; they need no
+model cooperation and no skill-text instruction to work:
+
+- `CaseController.find_prior_search` / `note_skipped_search`: an exact-duplicate
+  search (same source, query, identifiers, window) is not re-executed against
+  a real tool a second time.
+- `CaseController.circuit_breaker_open` (`CIRCUIT_BREAKER_THRESHOLD = 2`): a
+  source that has failed twice in a row this case is not retried; a Data Gap
+  should be recorded instead.
+- `CaseController._consecutive_no_novelty` / `_replan_required`: three
+  searches in a row that add no new evidence block completion until the model
+  explicitly re-plans (`accept_replan`).
+- `HybridEngine(max_rounds=8)` is a hard backstop, not the primary defense.
+
+All four survive `CaseController.snapshot()`/`from_snapshot()` round-trips, so
+a resumed multi-turn investigation does not silently lose this state.
+
+`tools/dudley_canary.py` runs the same golden case, same canned tool data,
+through every model backend with a credential set (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`), the daily-canary pattern for catching
+model drift a provider introduces silently. `tests/golden_cases.json`
+currently has spec tags only (id/mode/tier/required), no `case_input` or
+`canned_results` yet. Populating real fixtures is separate work; the script
+reports incomplete cases as skipped rather than fabricating fixture data.
+
 ## Writing boundary
 
 Humanizing means clearer, more natural, person-to-person language. It does not

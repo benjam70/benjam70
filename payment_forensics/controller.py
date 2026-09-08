@@ -142,6 +142,13 @@ class ToolResult:
         )
 
 
+def search_signature(source: str, query: str, identifiers: Iterable[str], start_date: str | None, end_date: str | None) -> str:
+    """Fingerprint a search request so an exact repeat can be detected before re-running it."""
+    normalized_query = re.sub(r"\s+", " ", query.strip().lower())
+    normalized_identifiers = ",".join(sorted(set(identifiers)))
+    return "|".join((source.lower(), normalized_identifiers, normalized_query, start_date or "", end_date or ""))
+
+
 @dataclass(frozen=True)
 class SearchRecord:
     source: str
@@ -166,7 +173,6 @@ class SearchRecord:
             and not self.truncated
             and self.scoped_to_case
             and self.error is None
-            and not self.warnings
             and (
                 self.result_state == SearchResultState.NO_RESULT
                 or (self.result_state == SearchResultState.RESULTS and self.fact_count > 0)
@@ -175,9 +181,7 @@ class SearchRecord:
 
     @property
     def signature(self) -> str:
-        query = re.sub(r"\s+", " ", self.query.strip().lower())
-        identifiers = ",".join(sorted(set(self.identifiers)))
-        return "|".join((self.source.lower(), identifiers, query, self.start_date or "", self.end_date or ""))
+        return search_signature(self.source, self.query, self.identifiers, self.start_date, self.end_date)
 
 
 @dataclass(frozen=True)
@@ -241,6 +245,8 @@ class CaseController:
     events; this class only validates and gates the resulting proposals.
     """
 
+    CIRCUIT_BREAKER_THRESHOLD = 2
+
     def __init__(
         self,
         *,
@@ -288,6 +294,8 @@ class CaseController:
         self.ticket_understanding: dict[str, Any] = {}
         self.provenance_edges: list[dict[str, Any]] = []
         self.review_records: list[dict[str, Any]] = []
+        self._consecutive_source_failures: dict[str, int] = {}
+        self.duplicate_search_count = 0
 
     def advance_phase(self, phase: InvestigationPhase | str) -> None:
         """Record a monotonic workflow phase for replay and diagnostics."""
@@ -463,8 +471,45 @@ class CaseController:
         self._update_receipt_relationships()
         return index
 
+    def circuit_breaker_open(self, source: str, *, threshold: int | None = None) -> bool:
+        """True once a source has failed consecutively enough times to stop retrying it this case.
+
+        Mirrors the circuit-breaker pattern: past the threshold, the caller should
+        stop spending real tool calls on this source and record a Data Gap instead,
+        rather than retrying a call that has already failed repeatedly in a row.
+        """
+        limit = self.CIRCUIT_BREAKER_THRESHOLD if threshold is None else threshold
+        return self._consecutive_source_failures.get(source, 0) >= limit
+
+    def find_prior_search(self, *, source: str, query: str, identifiers: Iterable[str], start_date: str | None = None, end_date: str | None = None) -> int | None:
+        """Return the index of an earlier search with an identical fingerprint, if any.
+
+        Lets a caller check before spending a real tool call whether this exact
+        search (same source, query, identifiers, and window) already ran this case.
+        """
+        signature = search_signature(source, query, identifiers, start_date, end_date)
+        for index, existing in enumerate(self.searches):
+            if existing.signature == signature:
+                return index
+        return None
+
+    def note_skipped_search(self, source: str, reason: str, *, is_duplicate: bool = False) -> None:
+        """Record that a proposed search was never executed, without touching coverage.
+
+        Use this for a circuit-breaker-open or exact-duplicate search that a caller
+        decided not to spend a real tool call on. Unlike `add_tool_result`, this never
+        writes to `coverage`: a skip is not a new attempt and must not be able to
+        overwrite an earlier genuine CHECKED or FAILED status for the same source.
+        """
+        if is_duplicate:
+            self.duplicate_search_count += 1
+        self._log("search_skipped", source=source, reason=reason, is_duplicate=is_duplicate)
+
     def add_tool_result(self, result: ToolResult, *, query: str, identifiers: Iterable[str], start_date: str | None = None, end_date: str | None = None, novelty: str = "new event", query_quality: int = 100, query_quality_reasons: Iterable[str] = ()) -> tuple[int, ...]:
         """Validate a tool result, update coverage, and admit only valid facts."""
+        if self.find_prior_search(source=result.source, query=query, identifiers=identifiers, start_date=start_date, end_date=end_date) is not None:
+            self.duplicate_search_count += 1
+            self._log("duplicate_search_detected", source=result.source, query=query, duplicate_search_count=self.duplicate_search_count)
         error_text = (result.error or "").casefold()
         error_text = result.diagnostics.casefold()
         coverage_gap = any(marker in error_text for marker in ("missing data", "missingdata", "missing archive", "archive data", "rehydrat", "incomplete data"))
@@ -479,6 +524,13 @@ class CaseController:
         else:
             self.coverage[result.source] = CoverageStatus.CHECKED
             validated = True
+        if validated:
+            self._consecutive_source_failures[result.source] = 0
+        else:
+            failures = self._consecutive_source_failures.get(result.source, 0) + 1
+            self._consecutive_source_failures[result.source] = failures
+            if failures == self.CIRCUIT_BREAKER_THRESHOLD:
+                self._log("circuit_breaker_opened", source=result.source, consecutive_failures=failures)
         record = SearchRecord(
             source=result.source,
             query=query,
@@ -666,6 +718,8 @@ class CaseController:
             "phase_history": list(self.phase_history),
             "event_log": list(self.event_log),
             "search_signatures": [search.signature for search in self.searches],
+            "consecutive_source_failures": dict(self._consecutive_source_failures),
+            "duplicate_search_count": self.duplicate_search_count,
         }
 
     @classmethod
@@ -696,6 +750,14 @@ class CaseController:
         controller.claim_ledger = list(snapshot.get("claim_ledger", ()))
         controller.provenance_edges = list(snapshot.get("provenance_edges", ()))
         controller.review_records = list(snapshot.get("review_records", ()))
+        controller.searches = [
+            SearchRecord(**{**search, "result_state": SearchResultState(search["result_state"])})
+            for search in snapshot.get("searches", ())
+        ]
+        controller._consecutive_no_novelty = int(snapshot.get("consecutive_no_novelty", 0))
+        controller._replan_required = bool(snapshot.get("replan_required", False))
+        controller._consecutive_source_failures = dict(snapshot.get("consecutive_source_failures", {}))
+        controller.duplicate_search_count = int(snapshot.get("duplicate_search_count", 0))
         return controller
 
     def _update_receipt_relationships(self) -> None:

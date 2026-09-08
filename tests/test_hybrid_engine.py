@@ -97,6 +97,74 @@ class HybridEngineTests(unittest.TestCase):
         engine = HybridEngine(FakeModel(), FakeTools(), max_rounds=1)
         self.assertEqual(engine._source_plan("Klarna dispute for GE12345678GB"), ())
 
+    def test_exact_duplicate_search_is_not_re_executed(self):
+        class CountingTools:
+            def __init__(self):
+                self.calls = 0
+
+            def search(self, request: SearchRequest) -> ToolResult:
+                self.calls += 1
+                if request.source == "Coralogix":
+                    return ToolResult("Coralogix", SearchResultState.NO_RESULT, True)
+                return ToolResult("Gateway", SearchResultState.RESULTS, True, facts=(refund_fact(),))
+
+        class RepeatingModel(FakeModel):
+            def propose(self, context):
+                if self.calls == 0:
+                    self.calls += 1
+                    return {
+                        "searches": [
+                            {"source": "Gateway", "query": "refund", "identifiers": ["GE12345678GB", "pi_123"]},
+                            {"source": "Gateway", "query": "refund", "identifiers": ["GE12345678GB", "pi_123"]},
+                        ],
+                        "relevant_sources": ["Gateway"],
+                        "identity_established": True,
+                        "lifecycle_checked": True,
+                        "complete": False,
+                    }
+                return super().propose(context)
+
+        tools = CountingTools()
+        result = HybridEngine(RepeatingModel(), tools, max_rounds=3).investigate("Refund for GE12345678GB, pi_123")
+        self.assertEqual(tools.calls, 1, "the second, identical search should not reach the executor")
+        self.assertEqual(result.state["duplicate_search_count"], 1)
+
+    def test_circuit_breaker_stops_retrying_a_repeatedly_failing_source(self):
+        class AlwaysFailingTools:
+            def __init__(self):
+                self.calls_by_source: dict[str, int] = {}
+
+            def search(self, request: SearchRequest) -> ToolResult:
+                self.calls_by_source[request.source] = self.calls_by_source.get(request.source, 0) + 1
+                if request.source == "Gateway":
+                    return ToolResult("Gateway", SearchResultState.RESULTS, True, facts=(refund_fact(),))
+                return ToolResult(request.source, SearchResultState.FAILED, False, error="timeout")
+
+        class RetryingModel(FakeModel):
+            def propose(self, context):
+                self.calls += 1
+                if self.calls <= 4:
+                    return {
+                        "searches": [
+                            {"source": "Gateway", "query": "refund", "identifiers": ["GE12345678GB", "pi_123"]},
+                            {"source": "Coralogix", "query": f"attempt {self.calls}", "identifiers": ["GE12345678GB", "pi_123"]},
+                        ],
+                        "relevant_sources": ["Gateway"],
+                        "identity_established": True,
+                        "lifecycle_checked": True,
+                        "complete": False,
+                    }
+                proposal = super().propose(context)
+                proposal["relevant_sources"] = ["Gateway"]
+                return proposal
+
+        tools = AlwaysFailingTools()
+        result = HybridEngine(RetryingModel(), tools, max_rounds=5).investigate("Refund for GE12345678GB, pi_123")
+        # 4 distinct Coralogix queries were proposed (different text each round, so not caught as
+        # exact duplicates), but the circuit breaker should have stopped real calls after 2 failures.
+        self.assertEqual(tools.calls_by_source.get("Coralogix", 0), 2)
+        self.assertGreaterEqual(result.state["consecutive_source_failures"].get("Coralogix", 0), 2)
+
     def test_attachment_arn_is_ingested_as_document_evidence(self):
         class AttachmentModel(FakeModel):
             def propose(self, context):

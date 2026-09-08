@@ -147,6 +147,69 @@ class PaymentForensicsControllerTests(unittest.TestCase):
         self.assertEqual(controller.snapshot()["consecutive_no_novelty"], 0)
         self.assertFalse(controller.snapshot()["replan_required"])
 
+    def test_circuit_breaker_opens_after_threshold_consecutive_failures(self):
+        controller = CaseController(case_id="R30", identifiers=("GE-1",))
+        self.assertFalse(controller.circuit_breaker_open("Gateway"))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.FAILED, False, error="timeout"), query="a", identifiers=("GE-1",))
+        self.assertFalse(controller.circuit_breaker_open("Gateway"))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.FAILED, False, error="timeout"), query="b", identifiers=("GE-1",))
+        self.assertTrue(controller.circuit_breaker_open("Gateway"))
+
+    def test_circuit_breaker_resets_on_success(self):
+        controller = CaseController(case_id="R31", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.FAILED, False, error="timeout"), query="a", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.RESULTS, True, facts=(fact("Gateway", "REFUNDED"),)), query="b", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.FAILED, False, error="timeout"), query="c", identifiers=("GE-1",))
+        self.assertFalse(controller.circuit_breaker_open("Gateway"))
+
+    def test_circuit_breaker_is_per_source(self):
+        controller = CaseController(case_id="R32", identifiers=("GE-1",))
+        for query in ("a", "b"):
+            controller.add_tool_result(ToolResult("Gateway", SearchResultState.FAILED, False, error="timeout"), query=query, identifiers=("GE-1",))
+        self.assertTrue(controller.circuit_breaker_open("Gateway"))
+        self.assertFalse(controller.circuit_breaker_open("Coralogix"))
+
+    def test_find_prior_search_matches_identical_request_only(self):
+        controller = CaseController(case_id="R33", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Coralogix", SearchResultState.NO_RESULT, True), query="refund status", identifiers=("GE-1",), start_date="2026-01-01T00:00:00Z", end_date="2026-01-02T00:00:00Z")
+        same = controller.find_prior_search(source="Coralogix", query="  Refund   Status  ", identifiers=("GE-1",), start_date="2026-01-01T00:00:00Z", end_date="2026-01-02T00:00:00Z")
+        self.assertEqual(same, 0)
+        different_window = controller.find_prior_search(source="Coralogix", query="refund status", identifiers=("GE-1",), start_date="2026-01-03T00:00:00Z", end_date="2026-01-04T00:00:00Z")
+        self.assertIsNone(different_window)
+        different_source = controller.find_prior_search(source="Gateway", query="refund status", identifiers=("GE-1",), start_date="2026-01-01T00:00:00Z", end_date="2026-01-02T00:00:00Z")
+        self.assertIsNone(different_source)
+
+    def test_add_tool_result_flags_but_does_not_block_executed_duplicate(self):
+        controller = CaseController(case_id="R34", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.NO_RESULT, True), query="refund", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.NO_RESULT, True), query="refund", identifiers=("GE-1",))
+        self.assertEqual(controller.duplicate_search_count, 1)
+
+    def test_note_skipped_search_does_not_touch_coverage(self):
+        controller = CaseController(case_id="R35", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.RESULTS, True, facts=(fact("Gateway", "REFUNDED"),)), query="refund", identifiers=("GE-1",))
+        self.assertEqual(controller.coverage["Gateway"], CoverageStatus.CHECKED)
+        controller.note_skipped_search("Gateway", "duplicate search, not re-executed", is_duplicate=True)
+        self.assertEqual(controller.coverage["Gateway"], CoverageStatus.CHECKED)
+        self.assertEqual(controller.duplicate_search_count, 1)
+
+    def test_snapshot_round_trip_preserves_loop_prevention_state(self):
+        controller = CaseController(case_id="R36", identifiers=("GE-1", "pay-1"), required_sources=("Gateway",))
+        for index in range(2):
+            controller.add_tool_result(ToolResult("Gateway", SearchResultState.NO_RESULT, True), query=f"lookup {index}", identifiers=("GE-1", "pay-1"))
+        controller.add_tool_result(ToolResult("Coralogix", SearchResultState.FAILED, False, error="timeout"), query="a", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Coralogix", SearchResultState.FAILED, False, error="timeout"), query="b", identifiers=("GE-1",))
+        controller.add_tool_result(ToolResult("Gateway", SearchResultState.NO_RESULT, True), query="lookup 0", identifiers=("GE-1", "pay-1"))  # exact duplicate
+        snapshot = controller.snapshot()
+
+        restored = CaseController.from_snapshot(snapshot)
+        self.assertEqual(len(restored.searches), len(controller.searches))
+        self.assertEqual(restored.duplicate_search_count, controller.duplicate_search_count)
+        self.assertEqual(restored.duplicate_search_count, 1)
+        self.assertTrue(restored.circuit_breaker_open("Coralogix"))
+        self.assertEqual(restored.snapshot()["consecutive_no_novelty"], controller.snapshot()["consecutive_no_novelty"])
+        self.assertIsNotNone(restored.find_prior_search(source="Gateway", query="lookup 0", identifiers=("GE-1", "pay-1")))
+
     def test_receipt_mismatch_is_retained_as_separate_evidence(self):
         controller = CaseController(case_id="R15", identifiers=("GE-1", "pay-1"))
         controller.add_evidence(EvidenceItem(

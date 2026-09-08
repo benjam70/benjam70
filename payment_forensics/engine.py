@@ -380,6 +380,19 @@ class HybridEngine:
 
     def _record_search(self, controller: CaseController, request: SearchRequest, novelty: str) -> None:
         quality = assess_query(request)
+        if controller.circuit_breaker_open(request.source):
+            controller.note_skipped_search(
+                request.source,
+                f"circuit breaker open: {controller.CIRCUIT_BREAKER_THRESHOLD} consecutive failures on this source this case, not retried",
+            )
+            return
+        if controller.find_prior_search(source=request.source, query=request.query, identifiers=request.identifiers, start_date=request.start_date, end_date=request.end_date) is not None:
+            controller.note_skipped_search(
+                request.source,
+                "duplicate search: identical source, query, identifiers, and window already ran this case, not re-executed",
+                is_duplicate=True,
+            )
+            return
         if request.source.casefold() in {source.casefold() for source in controller.required_sources} and controller.identifiers:
             searchable = " ".join((request.query, *request.identifiers)).casefold()
             if not any(identifier.casefold() in searchable for identifier in controller.identifiers):
