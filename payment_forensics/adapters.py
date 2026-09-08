@@ -10,8 +10,6 @@ import json
 import os
 from typing import Any, Callable, Mapping
 
-import httpx
-
 from .controller import SearchResultState, ToolResult
 from .engine import SearchExecutor, SearchRequest
 
@@ -124,6 +122,8 @@ class OpenAIResponsesModel:
         self.timeout = timeout
 
     def _request(self, *, input_text: str, structured: bool) -> dict[str, Any]:
+        import httpx
+
         payload: dict[str, Any] = {
             "model": self.model,
             "instructions": self.instructions,
@@ -166,6 +166,74 @@ class OpenAIResponsesModel:
     def render(self, mode: str, context: Mapping[str, Any], fact_ids: tuple[int, ...]) -> str:
         prompt = json.dumps({"mode": mode, "context": context, "approved_fact_ids": fact_ids}, default=str)
         return self._output_text(self._request(input_text=prompt, structured=False))
+
+
+class LiteLLMModel:
+    """Vendor-agnostic proposal model routed through LiteLLM's `completion()`.
+
+    `model` follows LiteLLM's provider-prefixed naming (e.g. `"claude-opus-4-6"`,
+    `"gemini/gemini-3-pro"`, `"gpt-5.2"`). Credentials are read by LiteLLM from
+    the vendor's own environment variable (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+    `OPENAI_API_KEY`, ...); this adapter does not manage per-vendor auth.
+
+    LiteLLM calls always bill as metered API usage on the underlying vendor,
+    never a subscription plan, regardless of which model string is used.
+    """
+
+    def __init__(self, *, instructions: str, model: str | None = None, timeout: float = 120.0) -> None:
+        self.instructions = instructions
+        self.model = model or os.environ.get("DUDLEY_MODEL", "gpt-5.2")
+        self.timeout = timeout
+
+    def _complete(self, *, user_content: str, structured: bool) -> str:
+        import litellm
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": self.instructions},
+                {"role": "user", "content": user_content},
+            ],
+            "temperature": 0,
+            "timeout": self.timeout,
+        }
+        if structured:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "dudley_proposal", "strict": True, "schema": OpenAIResponsesModel.PROPOSAL_SCHEMA},
+            }
+        try:
+            response = litellm.completion(**kwargs)
+        except Exception as exc:  # provider/schema support varies; fall back to a plain JSON instruction
+            if not structured:
+                raise
+            kwargs.pop("response_format")
+            kwargs["messages"][0]["content"] += "\n\nRespond with a single JSON object matching the required schema. No prose, no markdown fences."
+            response = litellm.completion(**kwargs)
+        text = response["choices"][0]["message"]["content"]
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError(f"LiteLLM model {self.model!r} returned no content")
+        return text
+
+    def propose(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
+        raw = self._complete(user_content=json.dumps(context, default=str), structured=True)
+        proposal = json.loads(_strip_json_fence(raw))
+        if not isinstance(proposal, Mapping):
+            raise TypeError("LiteLLM proposal must decode to a JSON object")
+        return proposal
+
+    def render(self, mode: str, context: Mapping[str, Any], fact_ids: tuple[int, ...]) -> str:
+        prompt = json.dumps({"mode": mode, "context": context, "approved_fact_ids": fact_ids}, default=str)
+        return self._complete(user_content=prompt, structured=False)
+
+
+def _strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:]
+    return stripped.strip()
 
 
 class RegistrySearchExecutor(SearchExecutor):

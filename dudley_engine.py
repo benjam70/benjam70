@@ -6,7 +6,7 @@ import argparse
 import importlib
 from pathlib import Path
 
-from payment_forensics import BGEReranker, HybridEngine, OpenAIResponsesModel, RerankingSearchExecutor, check_startup_integrity
+from payment_forensics import BGEReranker, HybridEngine, LiteLLMModel, OpenAIResponsesModel, RerankingSearchExecutor, check_startup_integrity
 
 
 def main() -> int:
@@ -15,12 +15,13 @@ def main() -> int:
     parser.add_argument("--instructions", type=Path, default=Path(".agents/skills/payment-forensics/SKILL.md"))
     parser.add_argument("--adapter-module", required=True, help="Python module exposing build_search_executor()")
     parser.add_argument("--bge-rerank", action="store_true", help="Rerank returned case-scoped facts with the local BGE model")
+    parser.add_argument("--model", default=None, help="LiteLLM model string, e.g. gpt-5.2, claude-opus-4-6, gemini/gemini-3-pro. Defaults to OpenAI Responses API.")
     args = parser.parse_args()
     integrity = check_startup_integrity(Path(__file__).resolve().parent)
     if not integrity.allowed:
         parser.error("payment-forensics startup integrity check failed: " + "; ".join(integrity.missing))
     instructions = args.instructions.read_text(encoding="utf-8")
-    model = OpenAIResponsesModel(instructions=instructions)
+    model = LiteLLMModel(instructions=instructions, model=args.model) if args.model else OpenAIResponsesModel(instructions=instructions)
     adapter_module = importlib.import_module(args.adapter_module)
     tools = adapter_module.build_search_executor()
     if args.bge_rerank:
