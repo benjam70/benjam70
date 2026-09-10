@@ -22,6 +22,36 @@ _SENTENCE_RE = re.compile(r"[^.!?]+(?:[.!?]+|$)", re.MULTILINE)
 _WORD_RE = re.compile(r"\b[\w][\w'/-]*\b")
 _SENSITIVE_RE = re.compile(r"(?i)\b(?:cvv|cvc|security code)\s*[:=]?\s*\d{3,4}\b|(?<!\d)\d(?:[ -]?\d){12,18}\d(?!\d)")
 
+# Mode B ticket-recap heuristic (deterministic, no ML). Documented in
+# tests/test_output_validator.py. When ticket_text / prior_thread_facts is
+# provided, Mode B must add investigation content rather than restating the
+# Zendesk thread. Pass if a new investigation signal is present or the
+# content-token novelty ratio is at least MODE_B_TICKET_NOVELTY_MIN.
+MODE_B_TICKET_NOVELTY_MIN = 0.30
+MODE_B_RECAP_REASON = "Mode B restates ticket/thread facts without new investigation content"
+_MODE_B_RECAP_STOPWORDS = frozenset({
+    "a", "an", "and", "as", "at", "be", "been", "but", "by", "for", "from",
+    "had", "has", "have", "if", "in", "is", "it", "its", "no", "not", "of",
+    "on", "or", "so", "than", "that", "the", "then", "this", "to", "was",
+    "were", "with", "already", "customer", "order", "said", "them", "they",
+    "their", "told",
+})
+_INVESTIGATION_PHRASES = (
+    "payment system",
+    "payment provider",
+    "payment records",
+    "ge admin",
+    "admin shows",
+    "internal refund",
+    "refund letter",
+    "capture adjustment",
+    "coralogix",
+    "psp reference",
+)
+_ARN_RE = re.compile(r"\b\d{20,}\b")
+_PSP_RE = re.compile(r"\b(?:pi|ch|re|du|ca|or|tr|pay|txn|tx)_[A-Za-z0-9_-]+\b", re.IGNORECASE)
+_ORDER_RE = re.compile(r"\bGE\d{8,}[A-Z]{2}\b", re.IGNORECASE)
+
 
 def validate_claims(claims: Iterable[dict], approved_fact_ids: Iterable[int], evidence: Iterable[dict] = ()) -> OutputValidation:
     """Require every proposed factual claim to cite approved ledger facts."""
@@ -76,6 +106,8 @@ def validate_output(
     allow_gateway_names: bool = False,
     evidence: Iterable[dict] = (),
     claims: Iterable[dict] | None = None,
+    ticket_text: str | None = None,
+    prior_thread_facts: Iterable[str] | None = None,
 ) -> OutputValidation:
     reasons: list[str] = []
     normalized_mode = str(mode).upper()
@@ -124,6 +156,8 @@ def validate_output(
         ceiling = {"FAST": 80, "STANDARD": 150, "DEEP": 250}.get(str(tier).upper(), 150)
         if len(_WORD_RE.findall(text)) > ceiling:
             reasons.append(f"Mode {normalized_mode} exceeds {ceiling} words for {str(tier).upper()} tier")
+        if normalized_mode == "B":
+            reasons.extend(_mode_b_ticket_recap_reasons(text, ticket_text, prior_thread_facts))
 
     return OutputValidation(not reasons, tuple(reasons))
 
@@ -131,3 +165,98 @@ def validate_output(
 def _is_code_block(text: str) -> bool:
     stripped = text.strip()
     return stripped.startswith("```") and stripped.endswith("```")
+
+
+def _mode_b_ticket_recap_reasons(
+    text: str,
+    ticket_text: str | None,
+    prior_thread_facts: Iterable[str] | None,
+) -> tuple[str, ...]:
+    """Fail Mode B that mostly restates the Zendesk thread with no new investigation content.
+
+    The check is skipped when neither ticket_text nor prior_thread_facts is provided
+    (or both are empty), so existing callers keep their previous behavior.
+
+    Pass when either:
+    - Mode B contains a new investigation signal not present in the ticket corpus
+      (payment-system / Admin / Coralogix phrasing, or a PSP/ARN identifier the
+      thread does not already carry), or
+    - the novelty ratio of content tokens (stopwords and shared identifiers
+      excluded) is at least MODE_B_TICKET_NOVELTY_MIN.
+    """
+    corpus = _ticket_thread_corpus(ticket_text, prior_thread_facts)
+    if not corpus:
+        return ()
+    body = _mode_b_body(text)
+    if _has_new_investigation_signal(body, corpus):
+        return ()
+    if _novelty_ratio(body, corpus) >= MODE_B_TICKET_NOVELTY_MIN:
+        return ()
+    return (MODE_B_RECAP_REASON,)
+
+
+def _ticket_thread_corpus(ticket_text: str | None, prior_thread_facts: Iterable[str] | None) -> str:
+    parts: list[str] = []
+    if isinstance(ticket_text, str) and ticket_text.strip():
+        parts.append(ticket_text.strip())
+    if prior_thread_facts is not None:
+        for item in prior_thread_facts:
+            value = " ".join(str(item).split())
+            if value:
+                parts.append(value)
+    return "\n".join(parts)
+
+
+def _mode_b_body(text: str) -> str:
+    stripped = text.strip()
+    if not _is_code_block(stripped):
+        return stripped
+    inner = stripped[3:-3]
+    if "\n" in inner:
+        first, rest = inner.split("\n", 1)
+        if first.strip() and " " not in first.strip():
+            inner = rest
+    return inner.strip()
+
+
+def _investigation_identifiers(text: str) -> set[str]:
+    found = {match.casefold() for match in _ARN_RE.findall(text)}
+    found.update(match.casefold() for match in _PSP_RE.findall(text))
+    return found
+
+
+def _shared_identifiers(body: str, corpus: str) -> set[str]:
+    shared = _investigation_identifiers(body) & _investigation_identifiers(corpus)
+    body_orders = {match.casefold() for match in _ORDER_RE.findall(body)}
+    corpus_orders = {match.casefold() for match in _ORDER_RE.findall(corpus)}
+    shared.update(body_orders & corpus_orders)
+    return shared
+
+
+def _content_tokens(text: str, ignore: set[str] | None = None) -> list[str]:
+    skipped = set(_MODE_B_RECAP_STOPWORDS)
+    if ignore:
+        skipped.update(ignore)
+    return [
+        token.casefold()
+        for token in _WORD_RE.findall(text)
+        if token.casefold() not in skipped and len(token) > 1
+    ]
+
+
+def _has_new_investigation_signal(body: str, corpus: str) -> bool:
+    body_l = body.casefold()
+    corpus_l = corpus.casefold()
+    if any(phrase in body_l and phrase not in corpus_l for phrase in _INVESTIGATION_PHRASES):
+        return True
+    return bool(_investigation_identifiers(body) - _investigation_identifiers(corpus))
+
+
+def _novelty_ratio(body: str, corpus: str) -> float:
+    shared_ids = _shared_identifiers(body, corpus)
+    body_tokens = _content_tokens(body, shared_ids)
+    if not body_tokens:
+        return 0.0
+    corpus_tokens = set(_content_tokens(corpus, shared_ids))
+    novel = sum(1 for token in body_tokens if token not in corpus_tokens)
+    return novel / len(body_tokens)

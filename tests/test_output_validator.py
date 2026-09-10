@@ -1,6 +1,7 @@
 import unittest
 
 from payment_forensics import validate_claims, validate_humanized_draft, validate_output
+from payment_forensics.output_validator import MODE_B_RECAP_REASON
 
 
 class OutputValidatorTests(unittest.TestCase):
@@ -111,6 +112,89 @@ class OutputValidatorTests(unittest.TestCase):
         result = validate_humanized_draft(original, rewritten)
         self.assertFalse(result.allowed)
         self.assertIn("protected span changed or removed: GE123456789", result.reasons)
+
+    def test_mode_b_fails_when_it_only_repeats_ticket_text(self):
+        """Ticket-only recap fails: no new investigation signal and novelty < 0.30.
+
+        Heuristic (output_validator.MODE_B_TICKET_NOVELTY_MIN = 0.30): when
+        ticket_text or prior_thread_facts is provided, Mode B must either
+        contain a new investigation signal (payment system / Admin / Coralogix
+        phrasing, or a PSP/ARN identifier not already in the thread) or have a
+        content-token novelty ratio of at least 0.30 against the ticket corpus.
+        Shared order IDs and stopwords are excluded from the ratio. The check
+        is skipped when neither corpus argument is provided.
+        """
+        ticket = (
+            "Customer says they were charged twice for GE10760434362US. "
+            "CS told them a refund was submitted last week. "
+            "Ivan confirmed the refund on 03/01/2026."
+        )
+        recap = (
+            "```\n"
+            "Customer says they were charged twice for GE10760434362US. "
+            "CS told them a refund was submitted last week. "
+            "Ivan confirmed the refund on 03/01/2026.\n"
+            "```"
+        )
+        result = validate_output(
+            mode="B",
+            text=recap,
+            declared_fact_ids=(),
+            approved_fact_ids=(),
+            ticket_text=ticket,
+        )
+        self.assertFalse(result.allowed)
+        self.assertIn(MODE_B_RECAP_REASON, result.reasons)
+
+    def test_mode_b_passes_when_it_references_prior_note_and_adds_psp_finding(self):
+        ticket = (
+            "Customer says they were charged twice for GE10760434362US. "
+            "CS told them a refund was submitted last week. "
+            "Ivan confirmed the refund on 03/01/2026."
+        )
+        note = (
+            "```\n"
+            "Ivan already confirmed the refund. "
+            "Payment system shows ARN 15265676003000311389037 on 03/01/2026. "
+            "Don't reprocess.\n"
+            "```"
+        )
+        result = validate_output(
+            mode="B",
+            text=note,
+            declared_fact_ids=(),
+            approved_fact_ids=(),
+            ticket_text=ticket,
+            prior_thread_facts=("Ivan confirmed the refund on 03/01/2026.",),
+        )
+        self.assertTrue(result.allowed)
+        self.assertNotIn(MODE_B_RECAP_REASON, result.reasons)
+
+    def test_mode_b_skips_ticket_recap_check_without_ticket_corpus(self):
+        recap = (
+            "```\n"
+            "Customer says they were charged twice for GE10760434362US. "
+            "CS told them a refund was submitted last week.\n"
+            "```"
+        )
+        result = validate_output(
+            mode="B",
+            text=recap,
+            declared_fact_ids=(),
+            approved_fact_ids=(),
+        )
+        self.assertTrue(result.allowed)
+
+    def test_mode_b_ticket_recap_does_not_replace_banned_word_check(self):
+        result = validate_output(
+            mode="B",
+            text="```\nThe refund was successfully processed.\n```",
+            declared_fact_ids=(),
+            approved_fact_ids=(),
+            ticket_text="Customer asked about the refund.",
+        )
+        self.assertFalse(result.allowed)
+        self.assertTrue(any("banned Mode B term" in reason for reason in result.reasons))
 
 
 if __name__ == "__main__":
