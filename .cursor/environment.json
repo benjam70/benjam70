@@ -1,0 +1,4 @@
+{
+  "name": "payment-forensics MCP servers",
+  "install": "pip install --user -r mcp-servers/requirements.txt"
+}
