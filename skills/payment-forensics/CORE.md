@@ -84,20 +84,6 @@ python tools/dudley_gate_check.py <path to the JSON file>
 
 `GATE: PASS` means the reported state satisfies every hard rule above; only then generate Mode A. `GATE: FAIL` lists the specific unmet lines, each a real gap to close, not something to write around or re-run hoping for a different answer, so return to searching before trying again. This check cannot confirm a source was actually queried, it can only catch an investigation that is internally incomplete, missing coverage, an unresolved contradiction, an unproven negative claim, or no terminal state, so still do the verification pass above in good faith rather than reporting coverage that was not really checked. When no shell tool is available in this host, fall back to the self-assessment above and say so explicitly if asked how the gate was checked.
 
-### Avenue exhaustion and accuracy gates (HybridEngine)
-
-When `payment_forensics.engine.HybridEngine` is available, these additional hard controls apply on top of the gate above:
-
-1. **Avenue checklist.** At intake the engine builds deterministic predicates (identity, authorisation, capture/settlement, refund execution, ARN/rail, dispute lifecycle when relevant, terminal funds, hypothesis disconfirm). Completion is blocked while any predicate remains `OPEN`. Each must become `SUPPORTED`, `CONTRADICTED`, or `EXHAUSTED` with listed searches.
-2. **Programmatic round verdicts.** After every round the controller classifies progress as `PRODUCTIVE`, `QUERY_STALE`, or `EXHAUSTED`. `QUERY_STALE` forces a pivot (new identifier, source, window, or event term) rather than repeating the same angle. LLM "I'm done" is never sufficient while avenues remain open.
-3. **Force-continue.** `complete=true` is ignored while open avenues remain and the round is not exhausted. Default investigation budget is 16 rounds; a blocked exit includes an exhaustion certificate listing still-open predicates.
-4. **Hypothesis disconfirm.** Every active hypothesis must receive a contradicting/disconfirm search before a Finding can ship.
-5. **Triangulation.** Refund cases require Gateway+Coralogix when both are in the active source set; dispute cases require Justt+Coralogix when those sources are active.
-6. **CoVe + FineVerify.** Before Mode A/B/C output, the engine answers at least two disproof questions from evidence and scores checkable subclaims against admitted facts. A CoVe answer that overturns the Finding blocks completion.
-7. **Read-gate.** Newly admitted facts must be inspected (`evidence_inspected_fact_ids` or continued investigation) before completion.
-8. **Claim entailment / optional NLI.** Finding claims must be lexically entailed by their cited facts; an optional Hugging Face NLI checker can add contradiction rejection.
-9. **Terminal-state consistency.** Declared terminal funds state must agree with the lifecycle events admitted in evidence (and with an optional secondary terminal-state vote).
-
 ---
 
 ## RULE 0 — PASTED DATA IS THE INSTRUCTION (read this first, every time)

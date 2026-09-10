@@ -66,17 +66,6 @@ and refund arithmetic outside the model. In particular, an authorized amount
 that exceeds a fully refunded capture is classified as
 `UNCAPTURED_AUTHORIZATION`, not as a missing refund.
 
-Avenue exhaustion and accuracy gates are also deterministic:
-
-- `avenues.py` builds the intake checklist and round verdicts (`PRODUCTIVE` /
-  `QUERY_STALE` / `EXHAUSTED`). Open avenues block completion; stale rounds
-  force pivots.
-- `verification.py` runs CoVe disproof questions, FineVerify-style subclaim
-  scoring, read-gate inspection, claim entailment, optional NLI, and
-  terminal-state consistency before Mode A/B/C output is accepted.
-- Default `HybridEngine(max_rounds=16)` keeps digging while avenues remain
-  open; a blocked exit includes an `exhaustion_certificate`.
-
 Each controller snapshot records the current investigation phase, phase history,
 and ordered event log. Completed and blocked audit records include a
 `replay_hash` over the case state, gate, proposal outcome, and rendered output.
