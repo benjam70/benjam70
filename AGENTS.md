@@ -55,7 +55,13 @@ model cooperation and no skill-text instruction to work:
 - `CaseController._consecutive_no_novelty` / `_replan_required`: three
   searches in a row that add no new evidence block completion until the model
   explicitly re-plans (`accept_replan`).
-- `HybridEngine(max_rounds=8)` is a hard backstop, not the primary defense.
+- Avenue checklist + round verdicts (`PRODUCTIVE` / `QUERY_STALE` /
+  `EXHAUSTED`): completion is blocked while predicates remain `OPEN`; stale
+  rounds force pivots; `complete=true` is ignored until avenues close or the
+  budget is exhausted with an exhaustion certificate.
+- CoVe, FineVerify subclaims, read-gate, claim entailment, and terminal-state
+  consistency run before Mode A/B/C output is accepted.
+- `HybridEngine(max_rounds=16)` is a hard backstop, not the primary defense.
 
 All four survive `CaseController.snapshot()`/`from_snapshot()` round-trips, so
 a resumed multi-turn investigation does not silently lose this state.

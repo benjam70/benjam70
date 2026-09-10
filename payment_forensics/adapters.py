@@ -54,7 +54,32 @@ class OpenAIResponsesModel:
             "hypotheses": {"type": "array", "items": {"type": "object", "properties": {
                 "label": {"type": "string"}, "supporting": {"type": "array", "items": {"type": "integer"}},
                 "contradicting": {"type": "array", "items": {"type": "integer"}},
+                "disconfirm_searched": {"type": "boolean"},
             }, "required": ["label", "supporting", "contradicting"], "additionalProperties": False}},
+            "avenue_updates": {"type": "array", "items": {"type": "object", "properties": {
+                "predicate_id": {"type": "string"},
+                "status": {"type": "string", "enum": ["OPEN", "SUPPORTED", "CONTRADICTED", "EXHAUSTED"]},
+                "supporting_fact_ids": {"type": "array", "items": {"type": "integer"}},
+                "contradicting_fact_ids": {"type": "array", "items": {"type": "integer"}},
+                "exhaustion_reasons": {"type": "array", "items": {"type": "string"}},
+            }, "required": ["predicate_id", "status"], "additionalProperties": False}},
+            "cove_answers": {"type": "array", "items": {"type": "object", "properties": {
+                "question": {"type": "string"}, "answer": {"type": "string"},
+                "overturns_finding": {"type": "boolean"},
+                "evidence_fact_ids": {"type": "array", "items": {"type": "integer"}},
+            }, "required": ["question", "answer", "overturns_finding", "evidence_fact_ids"], "additionalProperties": False}},
+            "disconfirm_searches": {"type": "array", "items": {"type": "object", "properties": {
+                "source": {"type": "string"}, "query": {"type": "string"},
+                "identifiers": {"type": "array", "items": {"type": "string"}},
+                "start_date": {"type": ["string", "null"]}, "end_date": {"type": ["string", "null"]},
+                "novelty": {"type": "string"}, "hypothesis_label": {"type": "string"},
+            }, "required": ["source", "query", "identifiers", "hypothesis_label"], "additionalProperties": False}},
+            "evidence_inspected_fact_ids": {"type": "array", "items": {"type": "integer"}},
+            "secondary_terminal_state": {"type": ["string", "null"]},
+            "subclaims": {"type": "array", "items": {"type": "object", "properties": {
+                "claim": {"type": "string"}, "judgment": {"type": "string"},
+                "fact_ids": {"type": "array", "items": {"type": "integer"}},
+            }, "required": ["claim", "judgment", "fact_ids"], "additionalProperties": False}},
             "retries": {"type": "array", "items": {"type": "object", "properties": {
                 "failed_id": {"type": "integer"}, "later_id": {"type": "integer"}, "relation": {"type": "string"},
             }, "required": ["failed_id", "later_id", "relation"], "additionalProperties": False}},
@@ -107,7 +132,8 @@ class OpenAIResponsesModel:
             "component_lifecycle", "provider_refund_results", "amount_reconciliation",
             "identity_established", "lifecycle_checked", "retries_required",
             "retries_checked", "contradiction_ids_resolved", "terminal_state", "fact_ids", "claims", "negative_claims", "authorization_reconciliation", "replan", "mode", "tier",
-            "allow_gateway_names", "complete",
+            "allow_gateway_names", "complete", "avenue_updates", "cove_answers",
+            "disconfirm_searches", "evidence_inspected_fact_ids",
         ],
         "additionalProperties": False,
     }

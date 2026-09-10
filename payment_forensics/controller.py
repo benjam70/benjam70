@@ -17,6 +17,19 @@ from typing import Any, Iterable, Mapping
 
 from .safety import normalize_timestamp
 from .ledger import PaymentEvent, reconcile_events, reconcile_evidence, validate_provider_refund_response
+from .avenues import (
+    AvenuePredicate,
+    RoundVerdict,
+    apply_model_avenue_updates,
+    build_avenue_checklist,
+    classify_round_progress,
+    exhaustion_certificate,
+    forced_pivot_searches,
+    open_avenues,
+    required_triangulations,
+    triangulation_gaps,
+    update_avenues_from_state,
+)
 
 
 class CoverageStatus(str, Enum):
@@ -296,6 +309,15 @@ class CaseController:
         self.review_records: list[dict[str, Any]] = []
         self._consecutive_source_failures: dict[str, int] = {}
         self.duplicate_search_count = 0
+        self.avenues: list[AvenuePredicate] = []
+        self.round_verdicts: list[str] = []
+        self.inspected_fact_ids: set[int] = set()
+        self.pending_read_fact_ids: set[int] = set()
+        self.cove_answers: list[dict[str, Any]] = []
+        self.verification_bundle: dict[str, Any] = {}
+        self.forced_pivot_required = False
+        self._previous_open_avenues = 0
+        self._duplicate_search_count_at_round_start = 0
 
     def advance_phase(self, phase: InvestigationPhase | str) -> None:
         """Record a monotonic workflow phase for replay and diagnostics."""
@@ -327,6 +349,77 @@ class CaseController:
     def set_ticket_understanding(self, understanding: Mapping[str, Any]) -> None:
         self.ticket_understanding = dict(understanding)
         self._log("ticket_understood", primary_intent=self.ticket_understanding.get("primary_intent"), requested_artifacts=self.ticket_understanding.get("requested_artifacts", ()))
+
+    def initialize_avenues(self, case_input: str, *, intent: str | None = None) -> list[AvenuePredicate]:
+        """Build the mandatory avenue checklist once per case."""
+        if not self.avenues:
+            self.avenues = build_avenue_checklist(case_input, identifiers=self.identifiers, intent=intent or self.ticket_intent)
+            self._previous_open_avenues = len(open_avenues(self.avenues))
+            self._log("avenues_initialized", count=len(self.avenues), open=self._previous_open_avenues)
+        return self.avenues
+
+    def mark_facts_pending_read(self, fact_ids: Iterable[int]) -> None:
+        for fact_id in fact_ids:
+            self.pending_read_fact_ids.add(int(fact_id))
+
+    def mark_facts_inspected(self, fact_ids: Iterable[int]) -> None:
+        for fact_id in fact_ids:
+            value = int(fact_id)
+            self.inspected_fact_ids.add(value)
+            self.pending_read_fact_ids.discard(value)
+
+    def begin_round_tracking(self) -> None:
+        self._previous_open_avenues = len(open_avenues(self.avenues))
+        self._duplicate_search_count_at_round_start = self.duplicate_search_count
+
+    def refresh_avenues(self, *, case_input: str = "", model_updates: Iterable[Mapping[str, Any]] = ()) -> RoundVerdict:
+        """Update avenues from evidence and classify round progress."""
+        coverage = {key: value.value for key, value in self.coverage.items()}
+        evidence = [asdict(item) for item in self.evidence]
+        searches = [{**asdict(search), "result_state": search.result_state.value} for search in self.searches]
+        update_avenues_from_state(
+            self.avenues,
+            evidence=evidence,
+            searches=searches,
+            coverage=coverage,
+            identifiers=self.identifiers,
+            terminal_state=self.terminal_state,
+            funds_location=self.funds_location.value if self.funds_location else None,
+            hypotheses=self.hypotheses,
+            negative_claims=self.negative_claims,
+        )
+        if model_updates:
+            apply_model_avenue_updates(self.avenues, model_updates)
+        current_open = len(open_avenues(self.avenues))
+        new_fact_count = len(self.pending_read_fact_ids)
+        verdict = classify_round_progress(
+            previous_open=self._previous_open_avenues,
+            current_open=current_open,
+            new_fact_count=new_fact_count,
+            duplicate_search_count_delta=self.duplicate_search_count - self._duplicate_search_count_at_round_start,
+            consecutive_no_novelty=self._consecutive_no_novelty,
+            forced_pivot=self.forced_pivot_required,
+        )
+        self.round_verdicts.append(verdict.value)
+        self.forced_pivot_required = verdict == RoundVerdict.QUERY_STALE and current_open > 0
+        self._log("avenue_round", verdict=verdict.value, open=current_open, forced_pivot=self.forced_pivot_required)
+        return verdict
+
+    def pivot_search_proposals(self) -> tuple[dict[str, Any], ...]:
+        return forced_pivot_searches(self.avenues, self.identifiers)
+
+    def exhaustion_certificate(self) -> dict[str, Any]:
+        return exhaustion_certificate(self.avenues, round_verdicts=self.round_verdicts)
+
+    def triangulation_reasons(self, case_input: str) -> tuple[str, ...]:
+        coverage = {key: value.value for key, value in self.coverage.items()}
+        rules = required_triangulations(case_input, self.ticket_intent)
+        active = set(self.required_sources) | {
+            search.source for search in self.searches
+        } | {
+            key for key, value in self.coverage.items() if value != CoverageStatus.NOT_CHECKED
+        }
+        return triangulation_gaps(coverage, rules, available_sources=active)
 
     def record_previously_stated_facts(self, facts: Iterable[str]) -> None:
         for fact in facts:
@@ -467,6 +560,7 @@ class CaseController:
             )
         if item.validated:
             self._approved_fact_ids.add(index)
+            self.mark_facts_pending_read((index,))
         self._detect_contradictions(index)
         self._update_receipt_relationships()
         return index
@@ -564,6 +658,8 @@ class CaseController:
             self._consecutive_no_novelty += 1
             if self._consecutive_no_novelty >= 3:
                 self._replan_required = True
+        if admitted:
+            self.mark_facts_pending_read(admitted)
         return tuple(admitted)
 
     def accept_replan(self, replanned: bool) -> None:
@@ -576,8 +672,20 @@ class CaseController:
         """Mark an irrelevant or explicitly inaccessible source without hiding why."""
         self.coverage[source] = status
 
-    def add_hypothesis(self, label: str, supporting: Iterable[int] = (), contradicting: Iterable[int] = ()) -> None:
-        self.hypotheses.append({"label": label, "supporting": tuple(supporting), "contradicting": tuple(contradicting), "status": "active"})
+    def add_hypothesis(self, label: str, supporting: Iterable[int] = (), contradicting: Iterable[int] = (), *, disconfirm_searched: bool = False) -> None:
+        self.hypotheses.append({
+            "label": label,
+            "supporting": tuple(supporting),
+            "contradicting": tuple(contradicting),
+            "status": "active",
+            "disconfirm_searched": bool(disconfirm_searched or tuple(contradicting)),
+        })
+
+    def mark_hypothesis_disconfirmed(self, label: str) -> None:
+        for hypothesis in self.hypotheses:
+            if hypothesis.get("label") == label:
+                hypothesis["disconfirm_searched"] = True
+                hypothesis["status"] = "tested"
 
     def record_negative_claim(self, claim: str, *, source: str, identifiers: Iterable[str], adequate_window: bool, no_result_searches: int = 1, later_event_checked: bool = False) -> bool:
         identifiers_tuple = tuple(identifier for identifier in identifiers if identifier)
@@ -646,7 +754,7 @@ class CaseController:
         invalid = tuple(str(fact_id) for fact_id in requested if fact_id not in self._approved_fact_ids)
         return GateResult(not invalid, tuple(f"unapproved fact: {fact_id}" for fact_id in invalid))
 
-    def completion_gate(self, *, identity_established: bool, relevant_sources: Iterable[str], lifecycle_checked: bool | None = None, retries_required: bool = False, retries_checked: bool = True, contradiction_ids_resolved: Iterable[int] = (), intent_established: bool = True) -> GateResult:
+    def completion_gate(self, *, identity_established: bool, relevant_sources: Iterable[str], lifecycle_checked: bool | None = None, retries_required: bool = False, retries_checked: bool = True, contradiction_ids_resolved: Iterable[int] = (), intent_established: bool = True, case_input: str = "", require_avenue_exhaustion: bool = True) -> GateResult:
         reasons: list[str] = []
         if self.ticket_intent is not None and not intent_established:
             reasons.append("ticket intent not established")
@@ -679,6 +787,25 @@ class CaseController:
             reasons.append(f"{CompletionGate.TERMINAL_STATE} not established")
         if not self._approved_fact_ids and self.evidence:
             reasons.append(f"{CompletionGate.PROVENANCE} missing")
+        if require_avenue_exhaustion and self.avenues:
+            still_open = [item.predicate_id for item in open_avenues(self.avenues)]
+            if still_open:
+                reasons.append(f"avenues still open: {', '.join(still_open)}")
+            if self.forced_pivot_required:
+                reasons.append("query stale: forced pivot required before completion")
+        if case_input:
+            reasons.extend(self.triangulation_reasons(case_input))
+        active_without_disconfirm = [
+            str(item.get("label"))
+            for item in self.hypotheses
+            if str(item.get("status", "active")) == "active" and not item.get("disconfirm_searched") and not item.get("contradicting")
+        ]
+        if active_without_disconfirm:
+            reasons.append(f"hypotheses lack disconfirm search: {', '.join(active_without_disconfirm)}")
+        if self.avenues and self.pending_read_fact_ids:
+            reasons.append(f"read-gate: uninspected facts {sorted(self.pending_read_fact_ids)}")
+        if self.verification_bundle and not self.verification_bundle.get("allowed", True):
+            reasons.extend(f"accuracy: {reason}" for reason in self.verification_bundle.get("reasons", ()))
         return GateResult(not reasons, tuple(reasons))
 
     def snapshot(self) -> dict[str, Any]:
@@ -720,6 +847,14 @@ class CaseController:
             "search_signatures": [search.signature for search in self.searches],
             "consecutive_source_failures": dict(self._consecutive_source_failures),
             "duplicate_search_count": self.duplicate_search_count,
+            "avenues": [item.as_dict() for item in self.avenues],
+            "round_verdicts": list(self.round_verdicts),
+            "inspected_fact_ids": sorted(self.inspected_fact_ids),
+            "pending_read_fact_ids": sorted(self.pending_read_fact_ids),
+            "cove_answers": list(self.cove_answers),
+            "verification_bundle": dict(self.verification_bundle),
+            "forced_pivot_required": self.forced_pivot_required,
+            "exhaustion_certificate": self.exhaustion_certificate() if self.avenues else {},
         }
 
     @classmethod
@@ -758,6 +893,14 @@ class CaseController:
         controller._replan_required = bool(snapshot.get("replan_required", False))
         controller._consecutive_source_failures = dict(snapshot.get("consecutive_source_failures", {}))
         controller.duplicate_search_count = int(snapshot.get("duplicate_search_count", 0))
+        controller.avenues = [AvenuePredicate.from_dict(item) for item in snapshot.get("avenues", ())]
+        controller.round_verdicts = list(snapshot.get("round_verdicts", ()))
+        controller.inspected_fact_ids = set(int(value) for value in snapshot.get("inspected_fact_ids", ()))
+        controller.pending_read_fact_ids = set(int(value) for value in snapshot.get("pending_read_fact_ids", ()))
+        controller.cove_answers = list(snapshot.get("cove_answers", ()))
+        controller.verification_bundle = dict(snapshot.get("verification_bundle", {}))
+        controller.forced_pivot_required = bool(snapshot.get("forced_pivot_required", False))
+        controller._previous_open_avenues = len(open_avenues(controller.avenues))
         return controller
 
     def _update_receipt_relationships(self) -> None:

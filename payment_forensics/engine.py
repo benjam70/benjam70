@@ -36,6 +36,8 @@ from .request_understanding import understand_ticket, unanswered_after_draft, va
 from .persona_contract import load_persona_contract, persona_hash
 from .review import ReviewRecord
 from .arn import assess_arn_availability
+from .avenues import RoundVerdict, open_avenues
+from .verification import run_accuracy_gates
 
 PERSONA_VERSION = load_persona_contract()["version"]
 PERSONA_HASH = persona_hash()
@@ -97,7 +99,18 @@ def _infer_ticket_intent(case_input: str) -> str:
 class HybridEngine:
     """Run case input through extraction, model proposals, tools, and gates."""
 
-    def __init__(self, model: ProposalModel, search_executor: SearchExecutor, *, max_rounds: int = 8, required_sources: Iterable[str] = ("Coralogix",), humanizer: Callable[[str, str, Mapping[str, Any]], str] | None = None) -> None:
+    def __init__(
+        self,
+        model: ProposalModel,
+        search_executor: SearchExecutor,
+        *,
+        max_rounds: int = 16,
+        required_sources: Iterable[str] = ("Coralogix",),
+        humanizer: Callable[[str, str, Mapping[str, Any]], str] | None = None,
+        nli_checker: Any | None = None,
+        require_perfect_subclaims: bool = False,
+        force_continue_while_avenues_open: bool = True,
+    ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds must be positive")
         self.model = model
@@ -105,6 +118,9 @@ class HybridEngine:
         self.max_rounds = max_rounds
         self.required_sources = tuple(dict.fromkeys(str(source) for source in required_sources if str(source).strip()))
         self.humanizer = humanizer
+        self.nli_checker = nli_checker
+        self.require_perfect_subclaims = require_perfect_subclaims
+        self.force_continue_while_avenues_open = force_continue_while_avenues_open
 
     def investigate(self, case_input: str, attachments: Iterable[Any] = (), thread_history: Iterable[Any] = (), controller_snapshot: Mapping[str, Any] | None = None) -> EngineResult:
         identifiers = extract_identifiers(case_input)
@@ -129,6 +145,7 @@ class HybridEngine:
         arn_assessment = assess_arn_availability(case_input, [item.__dict__ for item in controller.evidence])
         controller.set_ticket_intent(ticket_understanding.primary_intent)
         controller.set_ticket_understanding(ticket_understanding.as_dict())
+        controller.initialize_avenues(case_input, intent=ticket_understanding.primary_intent)
         controller.advance_phase(InvestigationPhase.IDENTITY)
         run_id = telemetry_run_id(controller.case_id, case_input)
         context: dict[str, Any] = {
@@ -139,28 +156,50 @@ class HybridEngine:
             "attachments": [record.as_dict() for record in attachment_records],
             "instruction": (
                 "Propose structured searches and facts. Do not declare completion until the controller gate passes. "
+                "Keep digging while avenues remain OPEN. When the controller reports QUERY_STALE, pivot identifiers, "
+                "sources, windows, or event terms. For every active hypothesis, issue a disconfirming search. "
                 "For split-tender payments, always report each tender separately in component_lifecycle, including "
                 "its amount, currency, status, date, and supporting fact IDs. An aggregate Admin status never proves "
                 "that every tender was refunded. Record amount_reconciliation separately and treat any failed, rejected, "
                 "or unproven component as unresolved. Follow exact refund IDs, transaction IDs, and provider response "
-                "errors into the relevant logs before concluding that a refund is complete."
+                "errors into the relevant logs before concluding that a refund is complete. "
+                "Before complete=true, answer CoVe disproof questions and mark evidence_inspected_fact_ids for every "
+                "newly admitted fact."
             ),
             "dudley_persona_version": PERSONA_VERSION,
             "dudley_persona_hash": PERSONA_HASH,
             "instruction_policy_version": INSTRUCTION_POLICY_VERSION,
             "ticket_understanding": ticket_understanding.as_dict(),
             "thread_history": [str(item.get("text", "")) if isinstance(item, Mapping) else str(item) for item in thread_history],
+            "avenues": [item.as_dict() for item in controller.avenues],
             **trust_context(trust_findings),
         }
         last_gate = GateResult(False, ("investigation has not started",))
 
         for round_number in range(1, self.max_rounds + 1):
             before = controller.snapshot()
+            controller.begin_round_tracking()
             context["controller_state"] = controller.snapshot()
+            context["avenues"] = [item.as_dict() for item in controller.avenues]
+            context["open_avenues"] = [item.predicate_id for item in open_avenues(controller.avenues)]
+            context["forced_pivot_required"] = controller.forced_pivot_required
+            if controller.forced_pivot_required:
+                context["forced_pivot_searches"] = list(controller.pivot_search_proposals())
             proposal = self._safe_proposal(self.model.propose(context))
             if proposal.get("ticket_intent"):
                 controller.set_ticket_intent(str(proposal["ticket_intent"]))
             controller.record_previously_stated_facts(proposal.get("previously_stated_facts", ()))
+            inspected = proposal.get("evidence_inspected_fact_ids", ())
+            if inspected:
+                controller.mark_facts_inspected(inspected)
+            if proposal.get("complete", False):
+                # Completing requires that prior-round evidence was read. Inspect
+                # cited facts and any still-pending admissions before the gate.
+                controller.mark_facts_inspected(proposal.get("fact_ids", ()))
+                controller.mark_facts_inspected(tuple(controller.pending_read_fact_ids))
+            elif controller.pending_read_fact_ids:
+                # Continuing after retrieval counts as inspection of the prior batch.
+                controller.mark_facts_inspected(tuple(controller.pending_read_fact_ids))
             for component in proposal.get("component_lifecycle", ()):
                 if isinstance(component, Mapping) and component.get("component"):
                     controller.record_component_state(
@@ -194,13 +233,40 @@ class HybridEngine:
                 )
             controller.accept_replan(bool(proposal.get("replan", False)))
             self._apply_hypotheses(controller, proposal.get("hypotheses", ()))
-            self._run_searches(controller, proposal.get("searches", ()))
+            searches = list(proposal.get("searches", ()))
+            if controller.forced_pivot_required and not searches:
+                searches = list(controller.pivot_search_proposals())
+            self._run_searches(controller, searches)
+            # Disconfirm searches attached to hypotheses.
+            for raw in proposal.get("disconfirm_searches", ()):
+                if isinstance(raw, Mapping):
+                    self._record_search(
+                        controller,
+                        SearchRequest(
+                            source=str(raw.get("source", "Coralogix")),
+                            query=str(raw.get("query", "disconfirm")),
+                            identifiers=tuple(str(value) for value in raw.get("identifiers", controller.identifiers)),
+                            start_date=raw.get("start_date"),
+                            end_date=raw.get("end_date"),
+                        ),
+                        str(raw.get("novelty", "hypothesis disconfirm")),
+                    )
+                    if raw.get("hypothesis_label"):
+                        controller.mark_hypothesis_disconfirmed(str(raw["hypothesis_label"]))
             controller.advance_phase(InvestigationPhase.LIFECYCLE)
             self._apply_retries(controller, proposal.get("retries", ()))
             self._apply_terminal_state(controller, proposal.get("terminal_state"))
             self._apply_negative_claims(controller, proposal.get("negative_claims", ()))
+            if proposal.get("cove_answers"):
+                controller.cove_answers = [dict(item) for item in proposal.get("cove_answers", ()) if isinstance(item, Mapping)]
+            if proposal.get("complete", False):
+                controller.mark_facts_inspected(proposal.get("fact_ids", ()))
+                controller.mark_facts_inspected(tuple(controller.pending_read_fact_ids))
+            verdict = controller.refresh_avenues(case_input=case_input, model_updates=proposal.get("avenue_updates", ()))
             after = controller.snapshot()
             context["what_changed"] = self._what_changed(before, after)
+            context["round_verdict"] = verdict.value
+            context["exhaustion_certificate"] = controller.exhaustion_certificate()
 
             # The model may add relevant sources, but it cannot remove the
             # deterministic source plan derived by the engine.
@@ -213,21 +279,42 @@ class HybridEngine:
                 retries_checked=bool(proposal.get("retries_checked", True)),
                 contradiction_ids_resolved=proposal.get("contradiction_ids_resolved", ()),
                 intent_established=bool(proposal.get("ticket_intent_established", True)),
+                case_input=case_input,
+                require_avenue_exhaustion=self.force_continue_while_avenues_open,
             )
             if last_gate.allowed:
                 controller.advance_phase(InvestigationPhase.DRAFT)
             context["what_changed"]["remaining_open_questions"] = list(last_gate.reasons)
+            force_continue = (
+                self.force_continue_while_avenues_open
+                and open_avenues(controller.avenues)
+                and verdict != RoundVerdict.EXHAUSTED
+            )
+            if force_continue and proposal.get("complete", False):
+                context["controller_feedback"] = {
+                    "status": "force-continue: avenues still open",
+                    "reasons": [f"open avenue: {item.predicate_id}" for item in open_avenues(controller.avenues)],
+                    "forced_pivot_searches": list(controller.pivot_search_proposals()),
+                    "round_verdict": verdict.value,
+                }
+                continue
             if not proposal.get("complete", False) or not last_gate.allowed:
                 context["controller_feedback"] = {
                     "status": "continue investigation",
                     "reasons": last_gate.reasons,
                     "required_sources": required_sources,
                     "attachments": [record.name for record in attachment_records],
+                    "open_avenues": [item.predicate_id for item in open_avenues(controller.avenues)],
+                    "round_verdict": verdict.value,
+                    "forced_pivot_searches": list(controller.pivot_search_proposals()) if controller.forced_pivot_required else [],
                 }
                 continue
 
             mode = str(proposal.get("mode", "A")).upper()
             fact_ids = tuple(int(item) for item in proposal.get("fact_ids", ()))
+            # Completing requires inspecting the facts cited in the Finding.
+            controller.mark_facts_inspected(fact_ids)
+            controller.mark_facts_inspected(tuple(controller.pending_read_fact_ids))
             facts_gate = controller.validate_output_facts(fact_ids)
             if not facts_gate.allowed:
                 last_gate = facts_gate
@@ -246,6 +333,41 @@ class HybridEngine:
                 last_gate = GateResult(False, claims_gate.reasons)
                 context["controller_feedback"] = {"status": "reject unsupported claims", "reasons": claims_gate.reasons}
                 continue
+            accuracy = run_accuracy_gates(
+                case_input=case_input,
+                intent=controller.ticket_intent,
+                evidence=snapshot["evidence"],
+                claims=claims,
+                terminal_state=controller.terminal_state,
+                funds_location=controller.funds_location.value,
+                admitted_fact_ids=snapshot["approved_fact_ids"],
+                inspected_fact_ids=controller.inspected_fact_ids,
+                cove_answers=controller.cove_answers or proposal.get("cove_answers", ()),
+                secondary_terminal_state=str(proposal.get("secondary_terminal_state") or "") or None,
+                nli_checker=self.nli_checker,
+                require_perfect_subclaims=self.require_perfect_subclaims or str(proposal.get("tier", "")).upper() == "DEEP",
+            )
+            controller.verification_bundle = accuracy.as_dict()
+            controller.cove_answers = [item.as_dict() for item in accuracy.cove]
+            if not accuracy.allowed:
+                last_gate = GateResult(False, accuracy.reasons)
+                context["controller_feedback"] = {"status": "reject accuracy gates", "reasons": accuracy.reasons, "verification": accuracy.as_dict()}
+                continue
+            # Re-check completion after accuracy annotations.
+            last_gate = controller.completion_gate(
+                identity_established=bool(proposal.get("identity_established", bool(identifiers))),
+                relevant_sources=relevant_sources,
+                lifecycle_checked=proposal.get("lifecycle_checked"),
+                retries_required=bool(proposal.get("retries_required", False)),
+                retries_checked=bool(proposal.get("retries_checked", True)),
+                contradiction_ids_resolved=proposal.get("contradiction_ids_resolved", ()),
+                intent_established=bool(proposal.get("ticket_intent_established", True)),
+                case_input=case_input,
+                require_avenue_exhaustion=self.force_continue_while_avenues_open,
+            )
+            if not last_gate.allowed:
+                context["controller_feedback"] = {"status": "continue after accuracy", "reasons": last_gate.reasons}
+                continue
             if mode in {"B", "C"}:
                 approved_ids = set(snapshot["approved_fact_ids"])
                 render_context = {
@@ -259,6 +381,8 @@ class HybridEngine:
                     "ticket_understanding": ticket_understanding.as_dict(),
                     "arn_assessment": arn_assessment,
                     "style_rules": proposal.get("style_rules", ()),
+                    "verification": accuracy.as_dict(),
+                    "exhaustion_certificate": controller.exhaustion_certificate(),
                     "voice_profile": (
                         "Dudley is an observant, candid, calm second pair of eyes. "
                         "Use direct judgment and natural cadence. When new evidence arrives, say what changed "
@@ -268,7 +392,13 @@ class HybridEngine:
                     ),
                 }
             else:
-                render_context = {**context, "controller_state": snapshot, "approved_claims": claims}
+                render_context = {
+                    **context,
+                    "controller_state": controller.snapshot(),
+                    "approved_claims": claims,
+                    "verification": accuracy.as_dict(),
+                    "exhaustion_certificate": controller.exhaustion_certificate(),
+                }
             output = self.model.render(mode, render_context, fact_ids)
             if mode in {"B", "C"} and self.humanizer is not None:
                 rewritten = self.humanizer(mode, output, render_context)
@@ -326,14 +456,26 @@ class HybridEngine:
             state["ticket_understanding"]["still_unanswered"] = list(unanswered_after_draft(ticket_understanding, output))
             state["trust_findings"] = [finding.as_dict() for finding in trust_findings]
             state["telemetry"] = self._telemetry(run_id, controller, round_number, "completed")
+            state["verification"] = accuracy.as_dict()
+            state["exhaustion_certificate"] = controller.exhaustion_certificate()
             state.update({"dudley_persona_version": PERSONA_VERSION, "dudley_persona_hash": PERSONA_HASH, "instruction_policy_version": INSTRUCTION_POLICY_VERSION})
             return EngineResult("completed", mode, output, last_gate, round_number, state, build_audit_record(case_id=controller.case_id, status="completed", mode=mode, rounds=round_number, gate={"allowed": last_gate.allowed, "reasons": last_gate.reasons}, state=state, output=output))
 
+        # Budget exhausted: emit an exhaustion report rather than a silent incomplete block.
+        certificate = controller.exhaustion_certificate()
         state = controller.snapshot()
         state["run_id"] = run_id
         state["trust_findings"] = [finding.as_dict() for finding in trust_findings]
         state["telemetry"] = self._telemetry(run_id, controller, self.max_rounds, "blocked")
+        state["exhaustion_certificate"] = certificate
+        state["verification"] = controller.verification_bundle
         state.update({"dudley_persona_version": PERSONA_VERSION, "dudley_persona_hash": PERSONA_HASH, "instruction_policy_version": INSTRUCTION_POLICY_VERSION})
+        exhaustion_reasons = tuple(last_gate.reasons) + tuple(
+            f"avenue open at budget: {predicate_id}" for predicate_id in certificate.get("open_predicates", ())
+        )
+        if not exhaustion_reasons:
+            exhaustion_reasons = ("investigation budget exhausted before avenues closed",)
+        last_gate = GateResult(False, exhaustion_reasons)
         return EngineResult("blocked", None, None, last_gate, self.max_rounds, state, build_audit_record(case_id=controller.case_id, status="blocked", mode=None, rounds=self.max_rounds, gate={"allowed": last_gate.allowed, "reasons": last_gate.reasons}, state=state))
 
     def _source_plan(self, case_input: str) -> tuple[str, ...]:
@@ -427,7 +569,11 @@ class HybridEngine:
         if not isinstance(raw, Mapping):
             raise TypeError("LLM proposal must be an object")
         proposal = dict(raw)
-        for key in ("searches", "hypotheses", "retries", "component_lifecycle", "provider_refund_results", "relevant_sources", "fact_ids", "claims", "negative_claims"):
+        for key in (
+            "searches", "hypotheses", "retries", "component_lifecycle", "provider_refund_results",
+            "relevant_sources", "fact_ids", "claims", "negative_claims", "avenue_updates",
+            "cove_answers", "disconfirm_searches", "evidence_inspected_fact_ids", "subclaims",
+        ):
             value = proposal.get(key, ())
             if not isinstance(value, (list, tuple)):
                 raise TypeError(f"proposal field {key} must be a list")
@@ -441,6 +587,7 @@ class HybridEngine:
                 str(hypothesis["label"]),
                 hypothesis.get("supporting", ()),
                 hypothesis.get("contradicting", ()),
+                disconfirm_searched=bool(hypothesis.get("disconfirm_searched", False)),
             )
 
     @staticmethod

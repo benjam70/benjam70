@@ -28,6 +28,31 @@ from .safety import normalize_timestamp, redact_sensitive
 from .retrieval import BGEEmbedder, BGEReranker, CandidateDocument, HybridCandidateIndex, RankedCandidate
 from .coralogix_search import QueryQuality, alternate_queries, assess_query, result_quality, time_sliced_queries
 from .nli import HFNLIConsistencyChecker, NLIResult
+from .avenues import (
+    AvenuePredicate,
+    PredicateStatus,
+    RoundVerdict,
+    TriangulationRule,
+    build_avenue_checklist,
+    classify_round_progress,
+    exhaustion_certificate,
+    open_avenues,
+    required_triangulations,
+    triangulation_gaps,
+    update_avenues_from_state,
+)
+from .verification import (
+    CoveQuestion,
+    SubClaimJudgment,
+    SubClaimResult,
+    VerificationBundle,
+    claim_text_entailed_by_facts,
+    decompose_subclaims,
+    fineverify_score,
+    run_accuracy_gates,
+    score_subclaim,
+    terminal_state_consistency,
+)
 from .humanize import HumanizationValidation, protected_spans, validate_humanized_draft
 from .trajectory import TrajectoryValidation, validate_trajectory
 from .attachments import AttachmentInput, AttachmentRecord, inspect_attachment, extract_attachment_facts, extract_admin_capture_facts
@@ -97,6 +122,27 @@ __all__ = [
     "time_sliced_queries",
     "HFNLIConsistencyChecker",
     "NLIResult",
+    "AvenuePredicate",
+    "PredicateStatus",
+    "RoundVerdict",
+    "TriangulationRule",
+    "build_avenue_checklist",
+    "classify_round_progress",
+    "exhaustion_certificate",
+    "open_avenues",
+    "required_triangulations",
+    "triangulation_gaps",
+    "update_avenues_from_state",
+    "CoveQuestion",
+    "SubClaimJudgment",
+    "SubClaimResult",
+    "VerificationBundle",
+    "claim_text_entailed_by_facts",
+    "decompose_subclaims",
+    "fineverify_score",
+    "run_accuracy_gates",
+    "score_subclaim",
+    "terminal_state_consistency",
     "HumanizationValidation",
     "protected_spans",
     "validate_humanized_draft",
