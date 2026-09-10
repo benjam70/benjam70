@@ -1,0 +1,110 @@
+{
+  "case_id": "CASE-20260910223842",
+  "identifiers": [
+    "CASE-20260910223842",
+    "GE13428307327NL",
+    "GE13115180754NL",
+    "ZFHZ6ZG49WKDJ5G3",
+    "172402370",
+    "6077060",
+    "6071121"
+  ],
+  "ticket_intent": "payment_status",
+  "relevant_sources": ["Ticket", "Coralogix"],
+  "coverage": {
+    "Ticket": "CHECKED",
+    "Coralogix": "N/A"
+  },
+  "evidence": [
+    {
+      "source": "Ticket",
+      "source_type": "zendesk",
+      "event_type": "PAYMENT",
+      "status": "CLAIMED",
+      "amount": "379.00",
+      "currency": "CHF",
+      "timestamp": null,
+      "order_id": null,
+      "payment_id": null,
+      "psp_reference": null,
+      "raw_fact": "Zendesk #6071121: Margarida Moreira claims CHF 379 charge on 31 Aug via Swissbilling; no order confirmation; wants refund/cancel",
+      "evidence_role": "customer_report",
+      "confidence_class": "CANDIDATE"
+    },
+    {
+      "source": "Ticket",
+      "source_type": "admin_capture",
+      "event_type": "AUTHORISATION",
+      "status": "REFUSED",
+      "amount": "319.00",
+      "currency": "CHF",
+      "timestamp": "2026-08-01",
+      "order_id": "GE13115180754NL",
+      "payment_id": "172402370",
+      "psp_reference": null,
+      "payment_method": "Twint",
+      "raw_fact": "Bot linked GE13115180754NL: CHF 319, Payment Declined, Twint, AuthorizationFailed, created 01/08/2026 Switzerland, merchant order internal id 172402370",
+      "evidence_role": "event",
+      "confidence_class": "CONFIRMED"
+    },
+    {
+      "source": "Gateway",
+      "source_type": "adyen_export",
+      "event_type": "AUTHORISATION",
+      "status": "REFUSED",
+      "amount": "319.00",
+      "currency": "CHF",
+      "timestamp": "2026-08-01",
+      "order_id": "GE13115180754NL",
+      "payment_id": "172402370",
+      "psp_reference": "ZFHZ6ZG49WKDJ5G3",
+      "payment_method": "TWINT",
+      "raw_fact": "Adyen PSP ZFHZ6ZG49WKDJ5G3: Refused CHF 319, merchant ref 172402370, TWINT, Refused (103:Payment aborted by the customer), Aug 1 2026",
+      "evidence_role": "event",
+      "confidence_class": "CONFIRMED",
+      "source_priority": 100
+    },
+    {
+      "source": "Ticket",
+      "source_type": "zendesk",
+      "event_type": "PAYMENT",
+      "status": "NO_FUNDS_STATED",
+      "amount": null,
+      "currency": null,
+      "timestamp": null,
+      "order_id": "GE13428307327NL",
+      "payment_id": null,
+      "psp_reference": null,
+      "raw_fact": "Zendesk #6077060 escalation (Solved): Finance/Dan Baum said We don't have the funds re GE13428307327NL",
+      "evidence_role": "event",
+      "confidence_class": "CONFIRMED"
+    }
+  ],
+  "negative_claims": [],
+  "component_lifecycle": {
+    "twint": {
+      "status": "REFUSED",
+      "amount": "319.00",
+      "currency": "CHF",
+      "timestamp": "2026-08-01"
+    }
+  },
+  "amount_reconciliation": {
+    "status": "RECONCILED",
+    "currency": "CHF",
+    "paid_total": "0.00",
+    "refund_total": "0.00",
+    "note": "ZFHZ6ZG49WKDJ5G3 refused abort. No capture. Swissbilling CHF 379 not in this ledger."
+  },
+  "terminal_state": {
+    "state": "UNKNOWN",
+    "funds_location": "unknown",
+    "lifecycle_checked": true
+  },
+  "identity_established": true,
+  "lifecycle_checked": true,
+  "retries_required": false,
+  "retries_checked": true,
+  "contradiction_ids_resolved": [],
+  "intent_established": true
+}
