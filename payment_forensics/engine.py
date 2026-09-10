@@ -279,6 +279,14 @@ class HybridEngine:
                     continue
                 output = rewritten
             controller.advance_phase(InvestigationPhase.VALIDATE)
+            prior_facts = tuple(
+                str(item)
+                for item in (
+                    *(context.get("thread_history") or ()),
+                    *(controller.snapshot().get("previously_stated_facts") or ()),
+                )
+                if str(item).strip()
+            )
             output_validation = validate_output(
                 mode=mode,
                 text=output,
@@ -288,6 +296,8 @@ class HybridEngine:
                 allow_gateway_names=bool(proposal.get("allow_gateway_names", False)),
                 evidence=controller.snapshot()["evidence"],
                 claims=claims,
+                ticket_text=case_input if mode == "B" else None,
+                prior_thread_facts=prior_facts if mode == "B" else None,
             )
             if not output_validation.allowed:
                 last_gate = GateResult(False, output_validation.reasons)
