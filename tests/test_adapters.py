@@ -3,7 +3,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from payment_forensics import JsonProposalModel, LiteLLMModel, OpenAIResponsesModel, RegistrySearchExecutor, SearchResultState, ToolResult
+from payment_forensics import ClaudeCodeProposalModel, JsonProposalModel, LiteLLMModel, OpenAIResponsesModel, RegistrySearchExecutor, SearchResultState, ToolResult
 from payment_forensics.engine import SearchRequest
 
 
@@ -24,6 +24,21 @@ class AdapterTests(unittest.TestCase):
         model = JsonProposalModel(lambda context: '{"complete": false, "searches": []}', lambda mode, context, fact_ids: "output")
         self.assertFalse(model.propose({})["complete"])
         self.assertEqual(model.render("A", {}, ()), "output")
+
+    def test_claude_code_adapter_uses_tool_free_bounded_calls(self):
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return types.SimpleNamespace(returncode=0, stdout='{"complete": false}', stderr="")
+
+        model = ClaudeCodeProposalModel(instructions="be dudley", executable="claude", runner=runner)
+        self.assertFalse(model.propose({"case": "fixture"})["complete"])
+        command, kwargs = calls[0]
+        self.assertIn("--tools", command)
+        self.assertEqual(command[command.index("--tools") + 1], "")
+        self.assertEqual(command[command.index("--max-turns") + 1], "1")
+        self.assertIn("Return only one JSON object", kwargs["input"])
 
     def test_registry_converts_missing_handler_to_failed(self):
         executor = RegistrySearchExecutor({})
