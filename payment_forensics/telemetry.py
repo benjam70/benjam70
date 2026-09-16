@@ -6,7 +6,12 @@ from dataclasses import dataclass, asdict
 from hashlib import sha256
 import json
 import os
+from threading import Lock
 from typing import Any, Mapping
+
+
+_OTEL_CONFIGURATION_LOCK = Lock()
+_OTEL_CONFIGURED = False
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,62 @@ def export_ndjson(events: list[TelemetryEvent]) -> str:
     return "\n".join(json.dumps(event.as_dict(), sort_keys=True, default=str) for event in events)
 
 
+def _otel_enabled() -> bool:
+    """Require an explicit opt-in and destination before creating any spans.
+
+    The OTLP SDK otherwise defaults to localhost in some configurations.  That
+    is surprising in a desktop or test run and makes it too easy to export
+    telemetry to an unintended collector.
+    """
+    return (
+        os.environ.get("DUDLEY_OTEL_ENABLED") == "1"
+        and bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
+    )
+
+
+def _configure_otel() -> object | None:
+    """Attach one OTLP/HTTP exporter to the application's tracer provider.
+
+    All endpoint, authentication and Coralogix resource settings remain in
+    standard OTEL environment variables; secrets never enter Dudley's code or
+    investigation state.  Importing this module remains dependency-free.
+    """
+    global _OTEL_CONFIGURED
+    if _OTEL_CONFIGURED:
+        try:
+            from opentelemetry import trace
+            return trace.get_tracer_provider()
+        except ImportError:
+            return None
+    with _OTEL_CONFIGURATION_LOCK:
+        if _OTEL_CONFIGURED:
+            try:
+                from opentelemetry import trace
+                return trace.get_tracer_provider()
+            except ImportError:
+                return None
+        try:
+            from opentelemetry import trace
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+            provider = trace.get_tracer_provider()
+            if not hasattr(provider, "add_span_processor"):
+                provider = TracerProvider(
+                    resource=Resource.create(
+                        {SERVICE_NAME: os.environ.get("OTEL_SERVICE_NAME", "dudley-engine")}
+                    )
+                )
+                trace.set_tracer_provider(provider)
+            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        except (ImportError, OSError, ValueError):
+            return None
+        _OTEL_CONFIGURED = True
+        return provider
+
+
 def emit_genai_spans(events: list[Mapping[str, Any]]) -> int:
     """Emit privacy-safe GenAI/tool spans when OTLP is explicitly enabled.
 
@@ -45,12 +106,12 @@ def emit_genai_spans(events: list[Mapping[str, Any]]) -> int:
     environment variables select the collector, so deployments can route them
     to Coralogix without hard-coding a vendor endpoint or secret here.
     """
-    if os.environ.get("DUDLEY_OTEL_ENABLED") != "1" or not events:
+    if not _otel_enabled() or not events:
         return 0
-    try:
-        from opentelemetry import trace
-    except ImportError:
+    provider = _configure_otel()
+    if provider is None:
         return 0
+    from opentelemetry import trace
     tracer = trace.get_tracer("dudley.engine")
     emitted = 0
     finish = next((event for event in reversed(events) if event.get("event") == "run_finished"), {})
