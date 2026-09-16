@@ -1,5 +1,340 @@
 [
-  {"id": "B-refund", "mode": "B", "tier": "FAST", "required": ["date", "refund", "reference", "no-new-facts"]},
-  {"id": "C-merchant", "mode": "C", "tier": "STANDARD", "required": ["subject", "plain-language", "no-gateway", "no-new-facts"]},
-  {"id": "A-conflict", "mode": "A", "tier": "STANDARD", "required": ["timeline", "contradiction", "terminal-state"]}
+  {
+    "id": "SYN-B-refund-success",
+    "synthetic": true,
+    "mode": "B",
+    "tier": "FAST",
+    "required": ["date", "refund", "reference", "no-new-facts"],
+    "case_input": "SYNTHETIC EVALUATION CASE. Write a Mode B internal note for order GE90000001ZZ and payment pi_synthetic_refund_01. The customer asks whether the 50.00 EUR refund succeeded.",
+    "canned_results": {
+      "Gateway": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Gateway",
+            "source_type": "gateway",
+            "event_type": "REFUND",
+            "status": "REFUNDED",
+            "amount": "50.00",
+            "currency": "EUR",
+            "timestamp": "2026-01-15T10:05:00Z",
+            "order_id": "GE90000001ZZ",
+            "payment_id": "pi_synthetic_refund_01",
+            "refund_id": "re_synthetic_refund_01",
+            "arn": "99999999999999999999999",
+            "raw_fact": "SYNTHETIC provider refund completed",
+            "source_priority": 100
+          }
+        ]
+      },
+      "Coralogix": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Coralogix",
+            "source_type": "log",
+            "event_type": "REFUND",
+            "status": "REFUNDED",
+            "amount": "50.00",
+            "currency": "EUR",
+            "timestamp": "2026-01-15T10:05:02Z",
+            "order_id": "GE90000001ZZ",
+            "payment_id": "pi_synthetic_refund_01",
+            "refund_id": "re_synthetic_refund_01",
+            "raw_fact": "SYNTHETIC refund success event",
+            "source_priority": 80
+          }
+        ]
+      }
+    },
+    "expected": {
+      "mode": "B",
+      "terminal_state": "REFUNDED",
+      "funds_location": "refunded",
+      "checked_sources": ["Gateway", "Coralogix"],
+      "required_event_types": ["REFUND"],
+      "min_evidence": 2
+    }
+  },
+  {
+    "id": "SYN-C-merchant-refund",
+    "synthetic": true,
+    "mode": "C",
+    "tier": "STANDARD",
+    "required": ["subject", "plain-language", "no-gateway", "no-new-facts"],
+    "case_input": "SYNTHETIC EVALUATION CASE. Draft a Mode C merchant email about order GE90000002ZZ and payment pi_synthetic_merchant_02. The merchant asks whether the 75.00 USD refund was processed.",
+    "canned_results": {
+      "Gateway": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Gateway",
+            "source_type": "gateway",
+            "event_type": "REFUND",
+            "status": "REFUNDED",
+            "amount": "75.00",
+            "currency": "USD",
+            "timestamp": "2026-02-03T14:20:00Z",
+            "order_id": "GE90000002ZZ",
+            "payment_id": "pi_synthetic_merchant_02",
+            "refund_id": "re_synthetic_merchant_02",
+            "raw_fact": "SYNTHETIC merchant-order refund completed",
+            "source_priority": 100
+          }
+        ]
+      },
+      "Coralogix": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Coralogix",
+            "source_type": "log",
+            "event_type": "REFUND",
+            "status": "REFUNDED",
+            "amount": "75.00",
+            "currency": "USD",
+            "timestamp": "2026-02-03T14:20:03Z",
+            "order_id": "GE90000002ZZ",
+            "payment_id": "pi_synthetic_merchant_02",
+            "refund_id": "re_synthetic_merchant_02",
+            "raw_fact": "SYNTHETIC matching refund log event",
+            "source_priority": 80
+          }
+        ]
+      }
+    },
+    "expected": {
+      "mode": "C",
+      "terminal_state": "REFUNDED",
+      "funds_location": "refunded",
+      "checked_sources": ["Gateway", "Coralogix"],
+      "required_event_types": ["REFUND"],
+      "min_evidence": 2
+    }
+  },
+  {
+    "id": "SYN-A-admin-provider-conflict",
+    "synthetic": true,
+    "mode": "A",
+    "tier": "STANDARD",
+    "required": ["timeline", "contradiction", "terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE. Investigate order GE90000003ZZ and payment pi_synthetic_conflict_03. Admin says the 120.00 GBP refund succeeded, but the provider result says it failed.",
+    "canned_results": {
+      "Admin": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Admin",
+            "source_type": "admin",
+            "event_type": "REFUND",
+            "status": "REFUNDED",
+            "amount": "120.00",
+            "currency": "GBP",
+            "timestamp": "2026-03-10T09:00:00Z",
+            "order_id": "GE90000003ZZ",
+            "payment_id": "pi_synthetic_conflict_03",
+            "refund_id": "re_synthetic_conflict_03",
+            "raw_fact": "SYNTHETIC Admin refund status successful",
+            "source_priority": 60
+          }
+        ]
+      },
+      "Gateway": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Gateway",
+            "source_type": "gateway",
+            "event_type": "REFUND",
+            "status": "FAILED",
+            "amount": "120.00",
+            "currency": "GBP",
+            "timestamp": "2026-03-10T09:00:02Z",
+            "order_id": "GE90000003ZZ",
+            "payment_id": "pi_synthetic_conflict_03",
+            "refund_id": "re_synthetic_conflict_03",
+            "raw_fact": "SYNTHETIC provider refund rejected",
+            "source_priority": 100
+          },
+          {
+            "source": "Gateway",
+            "source_type": "gateway",
+            "event_type": "CAPTURE",
+            "status": "CAPTURED",
+            "amount": "120.00",
+            "currency": "GBP",
+            "timestamp": "2026-03-01T12:00:00Z",
+            "order_id": "GE90000003ZZ",
+            "payment_id": "pi_synthetic_conflict_03",
+            "raw_fact": "SYNTHETIC original capture remains settled",
+            "source_priority": 100
+          }
+        ]
+      },
+      "Coralogix": {
+        "result_state": "RESULTS",
+        "facts": [
+          {
+            "source": "Coralogix",
+            "source_type": "log",
+            "event_type": "REFUND",
+            "status": "FAILED",
+            "amount": "120.00",
+            "currency": "GBP",
+            "timestamp": "2026-03-10T09:00:03Z",
+            "order_id": "GE90000003ZZ",
+            "payment_id": "pi_synthetic_conflict_03",
+            "refund_id": "re_synthetic_conflict_03",
+            "raw_fact": "SYNTHETIC refund failure response recorded",
+            "source_priority": 80
+          }
+        ]
+      }
+    },
+    "expected": {
+      "mode": "A",
+      "terminal_state": "REFUND_FAILED",
+      "funds_location": "merchant settlement",
+      "checked_sources": ["Admin", "Gateway", "Coralogix"],
+      "required_event_types": ["CAPTURE", "REFUND"],
+      "min_evidence": 4
+    }
+  },
+  {
+    "id": "SYN-R02-provider-refund-failure", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": ["terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R02. Investigate the failed 40.00 EUR refund for GE90000004ZZ, pi_synthetic_failed_04 and re_synthetic_failed_04.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "40.00", "currency": "EUR", "timestamp": "2026-04-01T08:00:00Z", "order_id": "GE90000004ZZ", "payment_id": "pi_synthetic_failed_04", "raw_fact": "SYNTHETIC capture completed", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "FAILED", "amount": "40.00", "currency": "EUR", "timestamp": "2026-04-02T08:00:00Z", "order_id": "GE90000004ZZ", "payment_id": "pi_synthetic_failed_04", "refund_id": "re_synthetic_failed_04", "raw_fact": "SYNTHETIC refund rejected", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "FAILED", "amount": "40.00", "currency": "EUR", "timestamp": "2026-04-02T08:00:01Z", "order_id": "GE90000004ZZ", "payment_id": "pi_synthetic_failed_04", "refund_id": "re_synthetic_failed_04", "raw_fact": "SYNTHETIC provider failure response", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "REFUND_FAILED", "funds_location": "merchant settlement", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["CAPTURE", "REFUND"], "min_evidence": 3}
+  },
+  {
+    "id": "SYN-R03-refund-retry-success", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": ["timeline", "terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R03. Investigate refund retry history for GE90000005ZZ, pi_synthetic_retry_05. The first 65.00 USD attempt failed and a later attempt may have succeeded.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "FAILED", "amount": "65.00", "currency": "USD", "timestamp": "2026-04-05T10:00:00Z", "order_id": "GE90000005ZZ", "payment_id": "pi_synthetic_retry_05", "refund_id": "re_synthetic_retry_a", "raw_fact": "SYNTHETIC first refund failed", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "REFUNDED", "amount": "65.00", "currency": "USD", "timestamp": "2026-04-05T10:10:00Z", "order_id": "GE90000005ZZ", "payment_id": "pi_synthetic_retry_05", "refund_id": "re_synthetic_retry_b", "raw_fact": "SYNTHETIC later refund succeeded", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "REFUNDED", "amount": "65.00", "currency": "USD", "timestamp": "2026-04-05T10:10:02Z", "order_id": "GE90000005ZZ", "payment_id": "pi_synthetic_retry_05", "refund_id": "re_synthetic_retry_b", "raw_fact": "SYNTHETIC retry completion event", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "REFUNDED", "funds_location": "refunded", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["REFUND"], "min_evidence": 3}
+  },
+  {
+    "id": "SYN-R04-open-dispute", "synthetic": true, "mode": "A", "tier": "DEEP",
+    "required": ["terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R04. Investigate GE90000006ZZ, pi_synthetic_dispute_06. A 90.00 EUR refund was requested while dispute du_synthetic_open_06 is open.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "90.00", "currency": "EUR", "timestamp": "2026-05-01T09:00:00Z", "order_id": "GE90000006ZZ", "payment_id": "pi_synthetic_dispute_06", "raw_fact": "SYNTHETIC capture", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "DISPUTE", "status": "OPEN", "amount": "90.00", "currency": "EUR", "timestamp": "2026-05-10T09:00:00Z", "order_id": "GE90000006ZZ", "payment_id": "pi_synthetic_dispute_06", "dispute_id": "du_synthetic_open_06", "raw_fact": "SYNTHETIC dispute open", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "BLOCKED", "amount": "90.00", "currency": "EUR", "timestamp": "2026-05-11T09:00:00Z", "order_id": "GE90000006ZZ", "payment_id": "pi_synthetic_dispute_06", "raw_fact": "SYNTHETIC refund blocked by open dispute", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "DISPUTE_OPEN", "funds_location": "held by dispute process", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["CAPTURE", "DISPUTE", "REFUND"], "min_evidence": 3}
+  },
+  {
+    "id": "SYN-R05-duplicate-capture", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": ["timeline", "terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R05. Check possible duplicate 30.00 GBP captures for GE90000007ZZ using pi_synthetic_duplicate_07.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "30.00", "currency": "GBP", "timestamp": "2026-05-20T11:00:00Z", "order_id": "GE90000007ZZ", "payment_id": "pi_synthetic_duplicate_07", "psp_reference": "psp_synthetic_capture_a", "raw_fact": "SYNTHETIC first capture", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "30.00", "currency": "GBP", "timestamp": "2026-05-20T11:00:05Z", "order_id": "GE90000007ZZ", "payment_id": "pi_synthetic_duplicate_07", "psp_reference": "psp_synthetic_capture_b", "raw_fact": "SYNTHETIC second capture", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "30.00", "currency": "GBP", "timestamp": "2026-05-20T11:00:05Z", "order_id": "GE90000007ZZ", "payment_id": "pi_synthetic_duplicate_07", "psp_reference": "psp_synthetic_capture_b", "raw_fact": "SYNTHETIC duplicate retry capture event", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "DUPLICATE_CAPTURE", "funds_location": "merchant settlement", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["CAPTURE"], "min_evidence": 3}
+  },
+  {
+    "id": "SYN-R06-partial-refund", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": ["refund", "terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R06. Reconcile the refund for GE90000008ZZ, pi_synthetic_partial_08: 100.00 EUR captured and 35.00 EUR refunded.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "100.00", "currency": "EUR", "timestamp": "2026-06-01T12:00:00Z", "order_id": "GE90000008ZZ", "payment_id": "pi_synthetic_partial_08", "raw_fact": "SYNTHETIC capture", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "REFUNDED", "amount": "35.00", "currency": "EUR", "timestamp": "2026-06-02T12:00:00Z", "order_id": "GE90000008ZZ", "payment_id": "pi_synthetic_partial_08", "refund_id": "re_synthetic_partial_08", "raw_fact": "SYNTHETIC partial refund", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "REFUNDED", "amount": "35.00", "currency": "EUR", "timestamp": "2026-06-02T12:00:02Z", "order_id": "GE90000008ZZ", "payment_id": "pi_synthetic_partial_08", "refund_id": "re_synthetic_partial_08", "raw_fact": "SYNTHETIC partial refund event", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "PARTIALLY_REFUNDED", "funds_location": "merchant settlement", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["CAPTURE", "REFUND"], "min_evidence": 3}
+  },
+  {
+    "id": "SYN-R07-multiple-refunds", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": ["timeline", "refund", "terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R07. Reconcile all refunds for GE90000009ZZ, pi_synthetic_multi_09: 80.00 USD captured with two refund references.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "80.00", "currency": "USD", "timestamp": "2026-06-10T12:00:00Z", "order_id": "GE90000009ZZ", "payment_id": "pi_synthetic_multi_09", "raw_fact": "SYNTHETIC capture", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "REFUNDED", "amount": "30.00", "currency": "USD", "timestamp": "2026-06-11T12:00:00Z", "order_id": "GE90000009ZZ", "payment_id": "pi_synthetic_multi_09", "refund_id": "re_synthetic_multi_a", "raw_fact": "SYNTHETIC first refund", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "REFUNDED", "amount": "50.00", "currency": "USD", "timestamp": "2026-06-12T12:00:00Z", "order_id": "GE90000009ZZ", "payment_id": "pi_synthetic_multi_09", "refund_id": "re_synthetic_multi_b", "raw_fact": "SYNTHETIC second refund", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "REFUNDED", "amount": "50.00", "currency": "USD", "timestamp": "2026-06-12T12:00:02Z", "order_id": "GE90000009ZZ", "payment_id": "pi_synthetic_multi_09", "refund_id": "re_synthetic_multi_b", "raw_fact": "SYNTHETIC second refund event", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "REFUNDED", "funds_location": "refunded", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["CAPTURE", "REFUND"], "min_evidence": 4}
+  },
+  {
+    "id": "SYN-R09-log-identity-filter", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": ["refund", "terminal-state"],
+    "case_input": "SYNTHETIC EVALUATION CASE R09. Find the refund state for GE90000010ZZ and pi_synthetic_match_10 despite unrelated search hits.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "REFUNDED", "amount": "55.00", "currency": "EUR", "timestamp": "2026-07-01T10:00:00Z", "order_id": "GE90000010ZZ", "payment_id": "pi_synthetic_match_10", "refund_id": "re_synthetic_match_10", "raw_fact": "SYNTHETIC matching refund", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "FAILED", "amount": "999.00", "currency": "USD", "timestamp": "2026-07-01T09:00:00Z", "order_id": "GE99999999ZZ", "payment_id": "pi_synthetic_unrelated", "raw_fact": "SYNTHETIC unrelated refund hit", "source_priority": 80},
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "REFUNDED", "amount": "55.00", "currency": "EUR", "timestamp": "2026-07-01T10:00:02Z", "order_id": "GE90000010ZZ", "payment_id": "pi_synthetic_match_10", "refund_id": "re_synthetic_match_10", "raw_fact": "SYNTHETIC matching refund log", "source_priority": 80}
+      ]}
+    },
+    "expected": {"mode": "A", "terminal_state": "REFUNDED", "funds_location": "refunded", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["REFUND"], "min_evidence": 2}
+  },
+  {
+    "id": "SYN-R10-missing-order-identity", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": [],
+    "case_input": "SYNTHETIC EVALUATION CASE R10. Investigate a claimed 25.00 EUR refund. No order ID, payment ID, refund ID or provider reference is available.",
+    "canned_results": {"Coralogix": {"result_state": "NO_RESULT", "facts": []}},
+    "expected": {"status": "blocked", "funds_location": "unknown", "checked_sources": ["Coralogix"], "min_evidence": 0}
+  },
+  {
+    "id": "SYN-R11-fx-gap", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": [],
+    "case_input": "SYNTHETIC EVALUATION CASE R11. Reconcile GE90000011ZZ, pi_synthetic_fx_11: 100.00 USD captured and 89.00 EUR shown as refunded, but no FX source or conversion rate is available.",
+    "canned_results": {
+      "Gateway": {"result_state": "RESULTS", "facts": [
+        {"source": "Gateway", "source_type": "gateway", "event_type": "CAPTURE", "status": "CAPTURED", "amount": "100.00", "currency": "USD", "timestamp": "2026-07-10T10:00:00Z", "order_id": "GE90000011ZZ", "payment_id": "pi_synthetic_fx_11", "raw_fact": "SYNTHETIC USD capture", "source_priority": 100},
+        {"source": "Gateway", "source_type": "gateway", "event_type": "REFUND", "status": "REFUNDED", "amount": "89.00", "currency": "EUR", "timestamp": "2026-07-11T10:00:00Z", "order_id": "GE90000011ZZ", "payment_id": "pi_synthetic_fx_11", "refund_id": "re_synthetic_fx_11", "raw_fact": "SYNTHETIC EUR refund without FX evidence", "source_priority": 100}
+      ]},
+      "Coralogix": {"result_state": "RESULTS", "facts": [
+        {"source": "Coralogix", "source_type": "log", "event_type": "REFUND", "status": "REFUNDED", "amount": "89.00", "currency": "EUR", "timestamp": "2026-07-11T10:00:02Z", "order_id": "GE90000011ZZ", "payment_id": "pi_synthetic_fx_11", "refund_id": "re_synthetic_fx_11", "raw_fact": "SYNTHETIC refund event; no FX rate", "source_priority": 80}
+      ]}
+    },
+    "expected": {"status": "blocked", "funds_location": "unknown", "checked_sources": ["Gateway", "Coralogix"], "required_event_types": ["CAPTURE", "REFUND"], "min_evidence": 3}
+  },
+  {
+    "id": "SYN-R12-partial-source", "synthetic": true, "mode": "A", "tier": "STANDARD",
+    "required": [],
+    "case_input": "SYNTHETIC EVALUATION CASE R12. Investigate refund status for GE90000012ZZ and pi_synthetic_partial_source_12. The required log search timed out after returning incomplete data.",
+    "canned_results": {
+      "Coralogix": {"result_state": "PARTIAL", "scoped_to_case": true, "truncated": true, "error": "SYNTHETIC timeout with incomplete results", "facts": []}
+    },
+    "expected": {"status": "blocked", "funds_location": "unknown", "min_evidence": 0}
+  }
 ]

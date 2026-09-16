@@ -2,7 +2,13 @@ import unittest
 from unittest.mock import patch
 
 from tools.dudley_canary import (
+    DEFAULT_GOLDEN_CASES_PATH,
+    DEFAULT_INSTRUCTIONS_PATH,
     build_backends,
+    build_fixtures,
+    evaluate_result,
+    load_golden_cases,
+    routing_verdict,
     run_canary,
     runnable_and_skipped_cases,
     tag_checkers,
@@ -44,6 +50,13 @@ class TagCheckerTests(unittest.TestCase):
 
 
 class RunnableCaseDetectionTests(unittest.TestCase):
+    def test_default_golden_pack_is_synthetic_and_fully_runnable(self):
+        cases = load_golden_cases(DEFAULT_GOLDEN_CASES_PATH)
+        runnable, skipped = runnable_and_skipped_cases(cases)
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(runnable), 13)
+        self.assertTrue(all(case.get("synthetic") is True for case in runnable))
+
     def test_incomplete_shipped_cases_are_reported_as_skipped_not_run(self):
         cases = [
             {"id": "B-refund", "mode": "B", "tier": "FAST", "required": ["date", "refund"]},
@@ -61,8 +74,65 @@ class RunnableCaseDetectionTests(unittest.TestCase):
         self.assertEqual(len(runnable), 1)
         self.assertEqual(skipped, [])
 
+    def test_structured_expectations_check_terminal_state_and_coverage(self):
+        cases = [{
+            "id": "synthetic",
+            "required": [],
+            "case_input": "synthetic case",
+            "canned_results": {},
+            "expected": {
+                "mode": "A",
+                "terminal_state": "REFUNDED",
+                "funds_location": "refunded",
+                "checked_sources": ["Gateway"],
+                "required_event_types": ["REFUND"],
+                "min_evidence": 1,
+            },
+        }]
+        assertion = build_fixtures(cases, tag_checkers())[0][2]
+        matching = type("Result", (), {
+            "status": "completed", "output": "ok", "mode": "A",
+            "state": {
+                "terminal_state": "REFUNDED", "funds_location": "refunded",
+                "coverage": {"Gateway": "CHECKED"}, "evidence": [{"event_type": "REFUND"}],
+            },
+        })()
+        wrong_state = type("Result", (), {
+            "status": "completed", "output": "ok", "mode": "A",
+            "state": {**matching.state, "terminal_state": "FAILED"},
+        })()
+        self.assertTrue(assertion(matching))
+        self.assertFalse(assertion(wrong_state))
+
+    def test_diagnostic_evaluation_names_each_mismatch(self):
+        case = {
+            "case_input": "synthetic",
+            "required": [],
+            "expected": {"status": "completed", "terminal_state": "REFUNDED", "checked_sources": ["Gateway"]},
+        }
+        result = type("Result", (), {
+            "status": "blocked", "output": None, "mode": None,
+            "state": {"terminal_state": "UNKNOWN", "coverage": {"Gateway": "FAILED"}, "evidence": []},
+        })()
+        reasons = evaluate_result(result, case)
+        self.assertTrue(any(reason.startswith("status:") for reason in reasons))
+        self.assertTrue(any(reason.startswith("terminal_state:") for reason in reasons))
+        self.assertTrue(any(reason.startswith("coverage Gateway:") for reason in reasons))
+
+    def test_routing_requires_every_evaluated_case_to_pass(self):
+        passing = type("Case", (), {"backend": "local", "passed": True, "case_id": "one"})()
+        failing = type("Case", (), {"backend": "local", "passed": False, "case_id": "two"})()
+        self.assertTrue(routing_verdict((passing,), "local")["eligible"])
+        verdict = routing_verdict((passing, failing), "local")
+        self.assertFalse(verdict["eligible"])
+        self.assertEqual(verdict["failed_cases"], ["two"])
+
 
 class BuildBackendsTests(unittest.TestCase):
+    def test_canary_uses_canonical_methodology_not_a_host_copy(self):
+        self.assertEqual(DEFAULT_INSTRUCTIONS_PATH.name, "CORE.md")
+        self.assertNotIn(".agents", str(DEFAULT_INSTRUCTIONS_PATH))
+
     def test_no_keys_means_no_backends(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(build_backends(), {})
@@ -71,7 +141,6 @@ class BuildBackendsTests(unittest.TestCase):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "x", "ANTHROPIC_API_KEY": "y", "GEMINI_API_KEY": "z"}):
             backends = build_backends()
         self.assertEqual(set(backends), {"openai", "claude", "gemini"})
-
 
 class FakeCanaryModel:
     """A minimal ProposalModel that completes a case in one round, for testing the harness."""

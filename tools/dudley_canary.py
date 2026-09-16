@@ -9,9 +9,8 @@ different rules. See `payment_forensics/regression.py` for the underlying
 
 Requirements this script does NOT satisfy on its own:
 
-- It only runs a model backend whose API key is present in the environment
-  (OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY). Missing
-  keys are reported and that backend is skipped, not treated as a failure.
+- It only runs a configured model backend. Provider API credentials are read
+  from environment variables; missing configuration skips that backend.
 - It only runs a golden case that actually has a "case_input" string and a
   "canned_results" mapping of source -> canned tool result. As of this
   writing, `tests/golden_cases.json` has neither: it only has id/mode/tier/
@@ -33,6 +32,9 @@ import json
 import os
 import re
 import sys
+import time
+import argparse
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -44,7 +46,7 @@ from payment_forensics.regression import RegressionResult, run_cross_model_regre
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GOLDEN_CASES_PATH = ROOT / "tests" / "golden_cases.json"
-DEFAULT_INSTRUCTIONS_PATH = ROOT / ".agents" / "skills" / "payment-forensics" / "SKILL.md"
+DEFAULT_INSTRUCTIONS_PATH = ROOT / "skills" / "payment-forensics" / "CORE.md"
 
 # Mirrors this skill's own Mode B/C gateway-naming rule: PayPal and Klarna may
 # be named, other PSP brands and the log source itself may not.
@@ -59,6 +61,22 @@ DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 REFERENCE_PATTERN = re.compile(r"\b[A-Za-z]{2,5}\d{6,}[A-Za-z]{0,2}\b|\b(?:pi|ch|re|du)_[A-Za-z0-9]{6,}\b")
 AMOUNT_PATTERN = re.compile(r"\b\d+(?:[.,]\d{2})\b")
 TERMINAL_STATE_WORDS = ("refunded", "reversed", "settlement", "pending", "disputed", "unknown", "chargeback")
+
+
+@dataclass(frozen=True)
+class CanaryCaseResult:
+    backend: str
+    case_id: str
+    passed: bool
+    reasons: tuple[str, ...]
+    status: str
+    mode: str | None
+    rounds: int
+    duration_ms: int
+    token_usage: Mapping[str, Any] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class CannedSearchExecutor(SearchExecutor):
@@ -141,14 +159,109 @@ def build_fixtures(cases: list[dict[str, Any]], checkers: Mapping[str, Callable[
     for case in cases:
         case_input = case["case_input"]
         required_tags = tuple(case.get("required", ()))
+        expected = dict(case.get("expected", {}))
 
-        def assertion(result: EngineResult, case_input=case_input, required_tags=required_tags) -> bool:
-            if result.status != "completed" or not result.output:
-                return False
-            return all(checkers[tag](result.output, case_input) for tag in required_tags if tag in checkers)
+        def assertion(result: EngineResult, case={**case, "required": list(required_tags)}) -> bool:
+            return not evaluate_result(result, case)
 
         fixtures.append((case["id"], case_input, assertion))
     return fixtures
+
+
+def evaluate_result(result: EngineResult, case: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return precise benchmark failures instead of a single opaque boolean."""
+    reasons: list[str] = []
+    expected = dict(case.get("expected", {}))
+    expected_status = str(expected.get("status", "completed"))
+    if result.status != expected_status:
+        reasons.append(f"status: expected {expected_status}, got {result.status}")
+    if expected_status == "completed" and not result.output:
+        reasons.append("output: completed result has no output")
+    if result.output:
+        for tag in case.get("required", ()):
+            checker = tag_checkers().get(str(tag))
+            if checker and not checker(result.output, str(case.get("case_input", ""))):
+                reasons.append(f"output rule failed: {tag}")
+    if expected.get("mode") and result.mode != expected["mode"]:
+        reasons.append(f"mode: expected {expected['mode']}, got {result.mode}")
+    state = result.state
+    if expected.get("terminal_state") and state.get("terminal_state") != expected["terminal_state"]:
+        reasons.append(f"terminal_state: expected {expected['terminal_state']}, got {state.get('terminal_state')}")
+    if expected.get("funds_location") and state.get("funds_location") != expected["funds_location"]:
+        reasons.append(f"funds_location: expected {expected['funds_location']}, got {state.get('funds_location')}")
+    evidence = state.get("evidence", ())
+    minimum = int(expected.get("min_evidence", 0))
+    if len(evidence) < minimum:
+        reasons.append(f"evidence: expected at least {minimum}, got {len(evidence)}")
+    for source in expected.get("checked_sources", ()):
+        actual = state.get("coverage", {}).get(source)
+        if actual != "CHECKED":
+            reasons.append(f"coverage {source}: expected CHECKED, got {actual}")
+    event_types = {item.get("event_type") for item in evidence}
+    for event_type in expected.get("required_event_types", ()):
+        if event_type not in event_types:
+            reasons.append(f"evidence: missing event type {event_type}")
+    for phrase in expected.get("output_contains", ()):
+        if not result.output or str(phrase).casefold() not in result.output.casefold():
+            reasons.append(f"output: missing required phrase {phrase!r}")
+    return tuple(reasons)
+
+
+def run_canary_detailed(
+    cases: list[dict[str, Any]],
+    backends: Mapping[str, Callable[[str], Any]],
+    instructions: str,
+) -> tuple[CanaryCaseResult, ...]:
+    results: list[CanaryCaseResult] = []
+    for backend_name, model_factory in backends.items():
+        model = model_factory(instructions)
+        for case in cases:
+            started = time.perf_counter()
+            try:
+                executor = CannedSearchExecutor(case.get("canned_results", {}))
+                engine_result = HybridEngine(model, executor).investigate(case["case_input"])
+                reasons = evaluate_result(engine_result, case)
+                results.append(CanaryCaseResult(
+                    backend=backend_name,
+                    case_id=case["id"],
+                    passed=not reasons,
+                    reasons=reasons,
+                    status=engine_result.status,
+                    mode=engine_result.mode,
+                    rounds=engine_result.rounds,
+                    duration_ms=round((time.perf_counter() - started) * 1000),
+                    token_usage=engine_result.state.get("model_usage"),
+                ))
+            except Exception as exc:
+                results.append(CanaryCaseResult(
+                    backend=backend_name,
+                    case_id=case["id"],
+                    passed=False,
+                    reasons=(f"execution error: {type(exc).__name__}: {exc}",),
+                    status="error",
+                    mode=None,
+                    rounds=0,
+                    duration_ms=round((time.perf_counter() - started) * 1000),
+                ))
+    return tuple(results)
+
+
+def routing_verdict(results: tuple[CanaryCaseResult, ...], backend: str) -> dict[str, Any]:
+    selected = [item for item in results if item.backend == backend]
+    if not selected:
+        return {"eligible": False, "pass_rate": 0.0, "reason": "backend has no evaluation results"}
+    passed = sum(item.passed for item in selected)
+    pass_rate = passed / len(selected)
+    failed_ids = [item.case_id for item in selected if not item.passed]
+    eligible = pass_rate == 1.0
+    return {
+        "eligible": eligible,
+        "pass_rate": round(pass_rate, 4),
+        "passed": passed,
+        "total": len(selected),
+        "failed_cases": failed_ids,
+        "reason": "100% of evaluated cases passed" if eligible else "automatic routing remains disabled",
+    }
 
 
 def build_model_runner(model_factory: Callable[[str], Any], instructions: str, cases_by_input: Mapping[str, Mapping[str, Any]]) -> Callable[[str], EngineResult]:
@@ -171,8 +284,11 @@ def run_canary(cases: list[dict[str, Any]], backends: Mapping[str, Callable[[str
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
-    golden_cases_path = Path(args[0]) if args else DEFAULT_GOLDEN_CASES_PATH
+    parser = argparse.ArgumentParser(description="Run Dudley's cross-model synthetic evaluation pack.")
+    parser.add_argument("golden_cases", nargs="?", type=Path, default=DEFAULT_GOLDEN_CASES_PATH)
+    parser.add_argument("--json", action="store_true", dest="json_output")
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    golden_cases_path = args.golden_cases
     cases = load_golden_cases(golden_cases_path)
     runnable, skipped = runnable_and_skipped_cases(cases)
     for message in skipped:
@@ -180,23 +296,30 @@ def main(argv: list[str] | None = None) -> int:
 
     backends = build_backends()
     if not backends:
-        print("No model API key set (OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY). Nothing to run.")
+        print("No model provider API key configured. Nothing to run.")
         return 2
     if not runnable:
         print("No runnable golden cases (each needs case_input and canned_results). Nothing to run.")
         return 2
 
     instructions = DEFAULT_INSTRUCTIONS_PATH.read_text(encoding="utf-8")
-    results = run_canary(runnable, backends, instructions)
-    exit_code = 0
-    for result in results:
-        status = "PASS" if result.failed == 0 else "FAIL"
-        print(f"{result.model_name}: {status} ({result.passed}/{result.passed + result.failed})")
-        for failure in result.failures:
-            print(f"  - {failure}")
-        if result.failed:
-            exit_code = 1
-    return exit_code
+    detailed = run_canary_detailed(runnable, backends, instructions)
+    verdicts = {name: routing_verdict(detailed, name) for name in backends}
+    if args.json_output:
+        print(json.dumps({"cases": [item.as_dict() for item in detailed], "routing": verdicts}, indent=2, default=str))
+    else:
+        for backend_name in backends:
+            selected = [item for item in detailed if item.backend == backend_name]
+            passed = sum(item.passed for item in selected)
+            status = "PASS" if passed == len(selected) else "FAIL"
+            print(f"{backend_name}: {status} ({passed}/{len(selected)})")
+            for item in selected:
+                if not item.passed:
+                    print(f"  - {item.case_id}: {'; '.join(item.reasons)}")
+            verdict = verdicts[backend_name]
+            route = "ELIGIBLE" if verdict["eligible"] else "DISABLED"
+            print(f"  automatic routine routing: {route} ({verdict['pass_rate']:.0%})")
+    return 0 if all(item.passed for item in detailed) else 1
 
 
 if __name__ == "__main__":

@@ -145,17 +145,28 @@ def build_controller(state: Mapping[str, Any]) -> CaseController:
 
     terminal_state = state.get("terminal_state")
     if terminal_state is not None:
-        if "state" not in terminal_state or "funds_location" not in terminal_state:
-            raise StateError("terminal_state requires 'state' and 'funds_location'")
+        # Accept both the compact host-MCP form and CaseController.snapshot()
+        # form so one persisted case can move between a host worker and the
+        # in-app HybridEngine without a lossy state translation.
+        if isinstance(terminal_state, Mapping):
+            state_name = terminal_state.get("state")
+            funds_value = terminal_state.get("funds_location")
+            lifecycle_checked = bool(terminal_state.get("lifecycle_checked", True))
+        else:
+            state_name = terminal_state
+            funds_value = state.get("funds_location")
+            lifecycle_checked = bool(state.get("lifecycle_checked", True))
+        if not state_name or not funds_value:
+            raise StateError("terminal_state requires state and funds_location")
         try:
-            funds_location = TerminalFundsState(terminal_state["funds_location"])
+            funds_location = TerminalFundsState(funds_value)
         except ValueError as exc:
             valid = ", ".join(status.value for status in TerminalFundsState)
-            raise StateError(f"terminal_state.funds_location: {terminal_state['funds_location']!r} is not valid ({valid})") from exc
+            raise StateError(f"terminal_state.funds_location: {funds_value!r} is not valid ({valid})") from exc
         controller.set_terminal_state(
-            str(terminal_state["state"]),
+            str(state_name),
             funds_location=funds_location,
-            lifecycle_checked=bool(terminal_state.get("lifecycle_checked", True)),
+            lifecycle_checked=lifecycle_checked,
         )
 
     return controller

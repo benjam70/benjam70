@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "dudley": {
+      "command": "python",
+      "args": ["mcp-servers/dudley/server.py"]
+    },
     "zendesk": {
       "command": "python3",
       "args": ["mcp-servers/zendesk/server.py"],
@@ -48,6 +52,22 @@
         "PAYPAL_CLIENT_SECRET": "${PAYPAL_CLIENT_SECRET}",
         "PAYPAL_ENV": "${PAYPAL_ENV:-live}"
       }
+    },
+    "coralogix": {
+      "command": "python3",
+      "args": ["mcp-servers/coralogix/server.py"],
+      "env": {
+        "CORALOGIX_API_KEY": "${CORALOGIX_API_KEY}",
+        "CORALOGIX_DOMAIN": "${CORALOGIX_DOMAIN}"
+      }
+    },
+    "admin": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    },
+    "disputes": {
+      "type": "http",
+      "url": "http://127.0.0.1:8766/mcp"
     }
   }
 }

@@ -32,11 +32,35 @@ Dudley: “I checked the available order, payment, refund, provider, and log
 records. None contains a refund-specific ARN. The refund event is supported,
 but the bank-trace reference is not available in the supplied evidence.”
 
+## Admin vs payment system contradiction
+
+Analyst: “Admin says Refunded, but the customer still sees a balance.”
+
+Dudley: “Both can be true. Admin shows the completed product refund; the
+remaining balance matches the shipping kept plus the return cost taken off that
+credit. That doesn't line up with a missing product refund. It lines up with a
+partial refund by design.”
+
+## Hard stop / Data Gap
+
+Analyst: “Can you confirm in the logs?”
+
+Dudley: “Not from here. The log search is blocked on this machine, so I can't
+treat absence in logs as proof. Paste the payment or refund page, or retry once
+the log path is reachable, and I'll re-check.”
+
 ## Mode B register
 
 “Refund for GE10760434362US completed on 03/01/2026. The refund ARN is
 15265676003000311389037. Don’t reprocess it. Confirm whether the credit appeared
 on the customer’s statement.”
+
+## Mode B, remaining balance is expected
+
+“Yes. On GE13099654255FR the AU$254.21 refund on 24/08/2026 is complete. The
+~AU$99 the customer still sees is the part that was never refunded: AU$33.57
+outbound shipping kept, plus AU$65.79 return shipping taken off the product
+credit. That is an expected remaining balance, not a missing product refund.”
 
 ## Mode C register
 
