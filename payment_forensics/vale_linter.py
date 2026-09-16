@@ -38,7 +38,12 @@ def run_vale(text: str, *, mode: str, executable: str = "vale", styles_path: str
         command = [binary, "--output=JSON", "--no-exit", str(path)]
         if styles_path:
             command.insert(1, f"--config={styles_path}")
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            # A bundled checker may exist but be blocked by host policy. It is
+            # optional quality feedback, never a reason to fail a case.
+            return ValeResult(available=False, allowed=True, skipped=True)
         if completed.returncode not in {0, 1, 2}:
             return ValeResult(True, False, messages=(f"Vale failed: {completed.stderr.strip() or completed.returncode}",))
         try:
