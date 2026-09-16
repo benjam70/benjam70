@@ -72,7 +72,7 @@ class BuildBackendsTests(unittest.TestCase):
             backends = build_backends()
         self.assertEqual(set(backends), {"openai", "claude", "gemini"})
 
-    @patch("desktop_app.claude_worker.claude_executable", return_value="claude")
+    @patch("tools.dudley_canary.shutil.which", return_value="claude")
     def test_claude_code_canary_is_explicitly_opt_in(self, _executable):
         with patch.dict("os.environ", {"DUDLEY_CANARY_CLAUDE_CODE": "1"}, clear=True):
             backends = build_backends()

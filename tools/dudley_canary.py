@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -123,9 +124,7 @@ def build_backends() -> dict[str, Callable[[str], Any]]:
     # it opt-in because a canary consumes that subscription, even though it is
     # isolated from live tools and uses only the synthetic fixtures below.
     if os.environ.get("DUDLEY_CANARY_CLAUDE_CODE") == "1":
-        from desktop_app.claude_worker import claude_executable
-
-        executable = claude_executable()
+        executable = shutil.which("claude")
         if executable:
             backends["claude_code"] = lambda instructions: ClaudeCodeProposalModel(
                 instructions=instructions,
