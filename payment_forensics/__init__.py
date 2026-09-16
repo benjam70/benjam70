@@ -14,7 +14,7 @@ from .controller import (
     ToolResult,
 )
 from .engine import EngineResult, HybridEngine, SearchRequest, extract_identifiers
-from .adapters import JsonProposalModel, LiteLLMModel, OpenAIResponsesModel, RegistrySearchExecutor, RerankingSearchExecutor
+from .adapters import ClaudeCodeProposalModel, JsonProposalModel, LiteLLMModel, OpenAIResponsesModel, RegistrySearchExecutor, RerankingSearchExecutor
 from .mcp_stdio import MCPServerSpec, MCPStdioSearchExecutor
 from .output_validator import OutputValidation, validate_claims, validate_output
 from .vale_linter import ValeResult, run_vale
@@ -58,6 +58,7 @@ __all__ = [
     "SearchRequest",
     "extract_identifiers",
     "JsonProposalModel",
+    "ClaudeCodeProposalModel",
     "RegistrySearchExecutor",
     "RerankingSearchExecutor",
     "OpenAIResponsesModel",

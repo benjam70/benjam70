@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 import time
 import argparse
@@ -128,7 +129,7 @@ def tag_checkers() -> dict[str, Callable[[str, str], bool]]:
 
 def build_backends() -> dict[str, Callable[[str], Any]]:
     """Return {backend_name: instructions -> ProposalModel} for every backend with a credential set."""
-    from payment_forensics.adapters import LiteLLMModel, OpenAIResponsesModel
+    from payment_forensics.adapters import ClaudeCodeProposalModel, LiteLLMModel, OpenAIResponsesModel
 
     backends: dict[str, Callable[[str], Any]] = {}
     if os.environ.get("OPENAI_API_KEY"):
@@ -137,6 +138,16 @@ def build_backends() -> dict[str, Callable[[str], Any]]:
         backends["claude"] = lambda instructions: LiteLLMModel(instructions=instructions, model=os.environ.get("DUDLEY_CLAUDE_MODEL", "claude-opus-4-6"))
     if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
         backends["gemini"] = lambda instructions: LiteLLMModel(instructions=instructions, model=os.environ.get("DUDLEY_GEMINI_MODEL", "gemini/gemini-3-pro"))
+    # Claude Code uses the signed-in local subscription, not an API key. Keep
+    # it opt-in because a canary consumes that subscription, even though it is
+    # isolated from live tools and uses only the synthetic fixtures below.
+    if os.environ.get("DUDLEY_CANARY_CLAUDE_CODE") == "1":
+        executable = shutil.which("claude")
+        if executable:
+            backends["claude_code"] = lambda instructions: ClaudeCodeProposalModel(
+                instructions=instructions,
+                executable=executable,
+            )
     return backends
 
 

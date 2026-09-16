@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from typing import Any, Callable, Mapping
 
 from .controller import SearchResultState, ToolResult
@@ -33,6 +34,74 @@ class JsonProposalModel:
         if not isinstance(output, str) or not output.strip():
             raise ValueError("LLM renderer returned empty output")
         return output
+
+
+class ClaudeCodeProposalModel:
+    """Use the local Claude Code subscription as a bounded proposal model.
+
+    This adapter deliberately has no tools.  The HybridEngine still owns tool
+    execution, so a golden-case canary receives only its synthetic input and
+    canned evidence rather than tenant data or live MCP access.
+    """
+
+    def __init__(
+        self,
+        *,
+        instructions: str,
+        executable: str,
+        runner: Callable[..., Any] = subprocess.run,
+        timeout: float = 90.0,
+    ) -> None:
+        self.instructions = instructions
+        self.executable = executable
+        self._runner = runner
+        self.timeout = timeout
+
+    def _run(self, request: str) -> str:
+        command = [
+            self.executable, "-p", "-", "--output-format", "text",
+            "--permission-mode", "dontAsk", "--tools", "", "--max-turns", "1",
+            "--effort", "low", "--disable-slash-commands",
+        ]
+        completed = self._runner(
+            command,
+            input=request,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=self.timeout,
+            check=False,
+        )
+        if completed.returncode:
+            raise RuntimeError((completed.stderr or completed.stdout or "Claude Code failed").strip())
+        output = str(completed.stdout or "").strip()
+        if not output:
+            raise RuntimeError("Claude Code returned no output")
+        return output
+
+    def propose(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
+        request = (
+            self.instructions
+            + "\n\nReturn only one JSON object matching the Dudley proposal schema. No markdown.\n"
+            + json.dumps(context, default=str)
+        )
+        raw = self._run(request)
+        try:
+            proposal = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Claude Code proposal was not JSON") from exc
+        if not isinstance(proposal, Mapping):
+            raise TypeError("Claude Code proposal must be a JSON object")
+        return proposal
+
+    def render(self, mode: str, context: Mapping[str, Any], fact_ids: tuple[int, ...]) -> str:
+        request = (
+            self.instructions
+            + "\n\nWrite only the final Dudley output. Do not use tools.\n"
+            + json.dumps({"mode": mode, "context": context, "approved_fact_ids": fact_ids}, default=str)
+        )
+        return self._run(request)
 
 
 class OpenAIResponsesModel:

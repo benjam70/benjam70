@@ -31,7 +31,7 @@ from .attachments import extract_admin_capture_facts, inspect_attachment
 from .persona_eval import validate_persona_turn
 from .humanize import validate_humanized_draft
 from .security import screen_external_content, trust_context
-from .telemetry import TelemetryEvent, query_digest, telemetry_run_id
+from .telemetry import TelemetryEvent, emit_genai_spans, query_digest, telemetry_run_id
 from .request_understanding import understand_ticket, unanswered_after_draft, validate_ticket_answer
 from .persona_contract import load_persona_contract, persona_hash
 from .review import ReviewRecord
@@ -326,6 +326,7 @@ class HybridEngine:
             state["ticket_understanding"]["still_unanswered"] = list(unanswered_after_draft(ticket_understanding, output))
             state["trust_findings"] = [finding.as_dict() for finding in trust_findings]
             state["telemetry"] = self._telemetry(run_id, controller, round_number, "completed")
+            state["otel_spans_emitted"] = emit_genai_spans(state["telemetry"])
             state.update({"dudley_persona_version": PERSONA_VERSION, "dudley_persona_hash": PERSONA_HASH, "instruction_policy_version": INSTRUCTION_POLICY_VERSION})
             return EngineResult("completed", mode, output, last_gate, round_number, state, build_audit_record(case_id=controller.case_id, status="completed", mode=mode, rounds=round_number, gate={"allowed": last_gate.allowed, "reasons": last_gate.reasons}, state=state, output=output))
 
@@ -333,6 +334,7 @@ class HybridEngine:
         state["run_id"] = run_id
         state["trust_findings"] = [finding.as_dict() for finding in trust_findings]
         state["telemetry"] = self._telemetry(run_id, controller, self.max_rounds, "blocked")
+        state["otel_spans_emitted"] = emit_genai_spans(state["telemetry"])
         state.update({"dudley_persona_version": PERSONA_VERSION, "dudley_persona_hash": PERSONA_HASH, "instruction_policy_version": INSTRUCTION_POLICY_VERSION})
         return EngineResult("blocked", None, None, last_gate, self.max_rounds, state, build_audit_record(case_id=controller.case_id, status="blocked", mode=None, rounds=self.max_rounds, gate={"allowed": last_gate.allowed, "reasons": last_gate.reasons}, state=state))
 

@@ -142,6 +142,13 @@ class BuildBackendsTests(unittest.TestCase):
             backends = build_backends()
         self.assertEqual(set(backends), {"openai", "claude", "gemini"})
 
+    @patch("tools.dudley_canary.shutil.which", return_value="claude")
+    def test_claude_code_canary_is_explicitly_opt_in(self, _executable):
+        with patch.dict("os.environ", {"DUDLEY_CANARY_CLAUDE_CODE": "1"}, clear=True):
+            backends = build_backends()
+        self.assertEqual(set(backends), {"claude_code"})
+
+
 class FakeCanaryModel:
     """A minimal ProposalModel that completes a case in one round, for testing the harness."""
 
