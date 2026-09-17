@@ -25,6 +25,8 @@ from .controller import (
 )
 from .output_validator import validate_claims, validate_output
 from .vale_linter import run_vale
+from .slop_check import run_slop_check
+from .slopscore_check import run_slopscore_check
 from .audit import build_audit_record
 from .coralogix_search import alternate_queries, assess_query, result_quality, time_sliced_queries
 from .attachments import extract_admin_capture_facts, inspect_attachment
@@ -33,6 +35,7 @@ from .humanize import validate_humanized_draft
 from .security import screen_external_content, trust_context
 from .telemetry import TelemetryEvent, emit_genai_spans, query_digest, telemetry_run_id
 from .request_understanding import understand_ticket, unanswered_after_draft, validate_ticket_answer
+from .thread_digest import build_thread_digest, validate_delta_output
 from .persona_contract import load_persona_contract, persona_hash
 from .review import ReviewRecord
 from .arn import assess_arn_availability
@@ -109,6 +112,11 @@ class HybridEngine:
     def investigate(self, case_input: str, attachments: Iterable[Any] = (), thread_history: Iterable[Any] = (), controller_snapshot: Mapping[str, Any] | None = None) -> EngineResult:
         identifiers = extract_identifiers(case_input)
         ticket_understanding = understand_ticket(case_input, thread_history)
+        thread_digest = build_thread_digest(
+            case_input,
+            thread_history,
+            recipient=ticket_understanding.audience,
+        )
         attachment_records = tuple(inspect_attachment(item, case_input=case_input) for item in attachments)
         trust_findings = screen_external_content(case_input, source="case input")
         for record in attachment_records:
@@ -129,6 +137,11 @@ class HybridEngine:
         arn_assessment = assess_arn_availability(case_input, [item.__dict__ for item in controller.evidence])
         controller.set_ticket_intent(ticket_understanding.primary_intent)
         controller.set_ticket_understanding(ticket_understanding.as_dict())
+        # Seed prior-told thread facts so Mode B/C cannot restate them without model cooperation.
+        controller.record_previously_stated_facts(
+            key for fact in (*thread_digest.already_told_merchant, *thread_digest.already_told_internal)
+            for key in fact.fact_keys
+        )
         controller.advance_phase(InvestigationPhase.IDENTITY)
         run_id = telemetry_run_id(controller.case_id, case_input)
         context: dict[str, Any] = {
@@ -143,12 +156,15 @@ class HybridEngine:
                 "its amount, currency, status, date, and supporting fact IDs. An aggregate Admin status never proves "
                 "that every tender was refunded. Record amount_reconciliation separately and treat any failed, rejected, "
                 "or unproven component as unresolved. Follow exact refund IDs, transaction IDs, and provider response "
-                "errors into the relevant logs before concluding that a refund is complete."
+                "errors into the relevant logs before concluding that a refund is complete. "
+                "For Mode B/C, use thread_digest.open_items as the only content brief: do not restate "
+                "already_told_fact_keys except as a half-sentence reference."
             ),
             "dudley_persona_version": PERSONA_VERSION,
             "dudley_persona_hash": PERSONA_HASH,
             "instruction_policy_version": INSTRUCTION_POLICY_VERSION,
             "ticket_understanding": ticket_understanding.as_dict(),
+            "thread_digest": thread_digest.as_dict(),
             "thread_history": [str(item.get("text", "")) if isinstance(item, Mapping) else str(item) for item in thread_history],
             **trust_context(trust_findings),
         }
@@ -257,14 +273,16 @@ class HybridEngine:
                     "what_changed": context.get("what_changed", {}),
                     "approved_conclusion": proposal.get("conclusion"),
                     "ticket_understanding": ticket_understanding.as_dict(),
+                    "thread_digest": thread_digest.as_dict(),
                     "arn_assessment": arn_assessment,
                     "style_rules": proposal.get("style_rules", ()),
                     "voice_profile": (
                         "Dudley is an observant, candid, calm second pair of eyes. "
                         "Use direct judgment and natural cadence. When new evidence arrives, say what changed "
                         "and what remains open. Preserve every fact and uncertainty. Avoid repeated catchphrases."
-                        " Answer the explicit request first. For Mode B, omit already-known facts and discrepancies "
-                        "that do not change the next action. Keep only the evidence needed to support the finding."
+                        " Answer the explicit request first. For Mode B and Mode C, omit already-known thread facts "
+                        "and discrepancies that do not change the next action. Keep only the evidence needed to "
+                        "support the finding. Use thread_digest.open_items as the content brief."
                     ),
                 }
             else:
@@ -305,10 +323,31 @@ class HybridEngine:
                         "reasons": last_gate.reasons,
                     }
                     continue
+                slop_result = run_slop_check(output)
+                if not slop_result.allowed:
+                    last_gate = GateResult(False, tuple(f"Slop-check: {message}" for message in slop_result.messages))
+                    context["controller_feedback"] = {
+                        "status": "reject AI-writing tells",
+                        "reasons": last_gate.reasons,
+                    }
+                    continue
+                slopscore_result = run_slopscore_check(output)
+                if not slopscore_result.allowed:
+                    last_gate = GateResult(False, tuple(f"SlopScore: {message}" for message in slopscore_result.messages))
+                    context["controller_feedback"] = {
+                        "status": "reject SlopScore threshold",
+                        "reasons": last_gate.reasons,
+                    }
+                    continue
                 ticket_reasons = validate_ticket_answer(ticket_understanding, output)
                 if ticket_reasons:
                     last_gate = GateResult(False, tuple(f"Ticket understanding: {reason}" for reason in ticket_reasons))
                     context["controller_feedback"] = {"status": "reject incomplete ticket answer", "reasons": last_gate.reasons}
+                    continue
+                delta_reasons = validate_delta_output(mode, output, thread_digest)
+                if delta_reasons:
+                    last_gate = GateResult(False, tuple(f"Thread digest: {reason}" for reason in delta_reasons))
+                    context["controller_feedback"] = {"status": "reject repeated thread facts", "reasons": last_gate.reasons}
                     continue
                 persona_result = validate_persona_turn(
                     output,

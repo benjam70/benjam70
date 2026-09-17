@@ -1,0 +1,2 @@
+# Optional Mode B/C SlopScore gate. The core engine skips this check when unset.
+slopscore-lint>=0.14.0

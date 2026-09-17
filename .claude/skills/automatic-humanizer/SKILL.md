@@ -136,6 +136,8 @@ For Mode B, sound like a concise colleague note: direct, practical, evidence-led
 
 For Mode C, sound like a clear professional merchant email: courteous, factual, jargon-free, and immediately understandable.
 
+Report outcome and consequence to the merchant, not internal payment-rail mechanics, unless the mechanism itself is the material fact (e.g. which entity currently holds the funds). Default to what happened and what happens next.
+
 ## Load-bearing pass (mandatory, run after every other pass)
 
 Passing every other check in this file, or an external filter like

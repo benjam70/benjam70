@@ -74,3 +74,9 @@ Humanizing means clearer, more natural, person-to-person language. It does not
 mean adding warmth, opinions, personal experience, certainty, or unsupported
 facts. Evidence, identifiers, dates, amounts, uncertainty, audience rules, and
 payment-forensics safety constraints always win over style preferences.
+
+Mode B/C must not restate facts already told to that recipient in the ticket
+thread. `payment_forensics.thread_digest` builds the digest; HybridEngine
+rejects restating drafts via `validate_delta_output` when thread history is
+passed in. Hosts without the engine still follow the THREAD DIGEST step in
+`skills/payment-forensics/CORE.md`.

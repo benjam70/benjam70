@@ -20,6 +20,7 @@ from .output_validator import OutputValidation, validate_claims, validate_output
 from .vale_linter import ValeResult, run_vale
 from .grammar import GrammarResult, run_grammar_check
 from .slop_check import SlopCheckResult, run_slop_check
+from .slopscore_check import SlopScoreResult, run_slopscore_check, prose_for_scoring
 from .relevance import CrossEncoderRelevanceChecker, RelevanceResult
 from .audit import build_audit_record, explain_replay_difference
 from .integrity import HostStatus, IntegrityResult, check_host_integration, check_startup_integrity
@@ -37,6 +38,7 @@ from .arn import assess_arn_availability
 from .security import TrustFinding, screen_external_content, trust_context
 from .telemetry import TelemetryEvent, export_ndjson, query_digest, telemetry_run_id
 from .request_understanding import TicketUnderstanding, understand_ticket, unanswered_after_draft, validate_ticket_answer
+from .thread_digest import build_thread_digest, validate_delta_output
 from .review import ReviewRecord, classify_review
 from .calibration import calibration_report
 from .persona_contract import compile_all, compile_persona, load_persona_contract, persona_hash
@@ -74,6 +76,9 @@ __all__ = [
     "run_grammar_check",
     "SlopCheckResult",
     "run_slop_check",
+    "SlopScoreResult",
+    "run_slopscore_check",
+    "prose_for_scoring",
     "CrossEncoderRelevanceChecker",
     "RelevanceResult",
     "build_audit_record",
@@ -129,6 +134,8 @@ __all__ = [
     "understand_ticket",
     "validate_ticket_answer",
     "unanswered_after_draft",
+    "build_thread_digest",
+    "validate_delta_output",
     "ReviewRecord",
     "classify_review",
     "calibration_report",

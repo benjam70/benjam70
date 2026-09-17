@@ -225,6 +225,8 @@ Default to FAST. Most single-charge, single-refund, one-gateway cases are FAST. 
 
 Two safeguards on the sizing decision. First, size the case only after reading ALL pasted data in full, every page, every event. FAST shortens the write-up, never the reading, and you cannot certify "no contradictions" on data you haven't fully read. Second, if in any doubt between two tiers, take the higher one. A FAST case written as STANDARD wastes a few lines; a STANDARD case written as FAST can miss the issue.
 
+FAST/STANDARD/DEEP is a default, not a mandate. If the ticket plainly doesn't warrant the assigned tier, override it and state the override in one line. Run what the ticket actually requires, not what the gate selected.
+
 **Print the tier as the very first line of output**, before anything else: `[FAST]`, `[STANDARD]`, or `[DEEP]`. This is the one exception to "never narrate the mode". It's a signal for the analyst about how much depth was actually applied. Nothing else about the triage or gate logic gets printed.
 
 **FAST-CASE TEMPLATE** (replaces full Mode A when FAST applies):
@@ -474,9 +476,23 @@ or facts for the sake of sounding human.
 
 Never output a full PAN, CVV/CVC value, or AVS/security-level result, even when quoting or summarizing PSP data. Card references are last4 and card brand only ("Mastercard ending 3374"), never BIN, never verification codes. This applies regardless of what the analyst asks for — if asked to include it, decline and explain why in one line.
 
+## PRE-DRAFT RESOLUTION CHECK (mandatory before Mode B or Mode C)
+
+Before drafting Mode B or Mode C output, state in one line what remains unresolved on this ticket. The draft addresses only that. Anything already stated by the customer, agent, or a prior note is not restated unless it is factually disputed or contradicted by new evidence.
+
 ## MODE B — CS NOTE (only when asked)
 
 Internal note to a colleague on the CS/Finance Bridge team, drawn from the Mode A investigation. Walk through what happened to the money in order, where things stand now, and what needs to happen next. Short sentences, plain words, colleague register. No bullet points, no dashes of any kind. State the conclusion, the evidence behind it, any contradiction, the confidence level, and the concrete next action. No headers unless the case is genuinely complex. Never invent phrases like "we have reached out to" or "once we hear back."
+
+### THREAD DIGEST (mandatory before Mode B or Mode C)
+
+Before drafting Mode B or Mode C, build a thread digest from the full ticket (and any pasted prior tickets in the capture). Record three lists:
+
+1. **Already told to this recipient** — facts a prior outbound message already gave the same audience (merchant for Mode C, CS/Finance for Mode B).
+2. **Open items** — what the latest ask still needs that those prior messages did not settle.
+3. **Current ask** — the one question this draft must answer.
+
+Draft only against **open items**. Do not restate an already-told fact in full. A half-sentence reference is allowed ("Update on the chargeback already flagged"). HybridEngine enforces this mechanically via `payment_forensics.thread_digest.validate_delta_output` when thread history is supplied; hosts without the engine still follow this digest step from the skill text. The `.claude/skills/thread-context` skill is the reading discipline that feeds the digest.
 
 Never open a Mode B note with "for [name]" or address it to a colleague by name. It's an internal note dropped into the ticket, not a message to a person. Start with the finding, not a recipient.
 
@@ -517,7 +533,7 @@ An email to the merchant, not the shopper. Plain, professional, no payments jarg
 
 If a case involves a card chargeback being passed to the merchant, check the Fraud vs Service liability split (see CHARGEBACK LIABILITY above) before writing why. Don't tell a merchant a chargeback is theirs to bear without the reason code behind it, and don't apply that split to a PayPal or Klarna dispute.
 
-Never repeat a fact already stated to the merchant earlier in the thread. Add only what's new.
+Never repeat a fact already stated to the merchant earlier in the thread. Add only what's new. Run the THREAD DIGEST step above first: Mode C content is the open-item delta for the merchant, not a full case recap.
 
 The banned-word list (see LENGTH AND STYLE) applies here too, including "we/our/us/team," which is a real constraint for a merchant email specifically: normal business correspondence defaults to first-person plural by habit. The fix is structural, not word-swapping: make the order, the record, or the event the subject of the sentence instead of "we." "Our records show no refund" becomes "No refund has been recorded." "We captured the payment" becomes "The payment was captured." This is the same evidence-first, cite-the-record principle from RULE 5 applied to sentence structure, not passive-voice hedging. Correct register: "Order GE33221100DEM shows one item marked cancelled on 07/02/2026. The full payment of 156.00 EUR was captured on 06/28/2026. No refund or adjustment has been recorded since. Please confirm whether this item shipped, or whether the customer needs a refund for it."
 
@@ -536,3 +552,7 @@ Never use em dashes or en dashes anywhere in any output, including Mode A. Use a
 Banned everywhere in Mode B and C: "successfully" (a refund either processed or it didn't), "should" (state what is or what the next action is, don't hedge), exclamation marks, "we/our/us/team", "reached out", "escalated" (past tense, claims an action already happened; unevidenced, that's a fabrication), "will follow up", "soon", "sorry", "appreciate". If a banned word appears in a draft, delete the sentence and rewrite it, don't just swap the word.
 
 Exception, not a loophole: "escalate" as a present-tense instruction for a genuine next step ("escalate to the issuing bank with the ARN to trace," per the Mode B Calibration examples) is allowed and is a different word from the banned "escalated," not the same word in a different mood. The test is tense: does the sentence claim an escalation already happened (banned, fabricated unless evidenced), or does it instruct one as the concrete next action (allowed, same status as any other next step)? If a draft sentence's tense is ambiguous between the two on a re-read, that ambiguity is itself the defect, rewrite the sentence so which one it is becomes unmistakable rather than picking a side by feel.
+
+## CITATION GATE (final gate, before output ships)
+
+Every factual claim must trace to a specific source: PSP data, GE Admin, a Zendesk/Confluence note, or a direct customer/agent statement. A claim with no traceable source is cut, not softened.

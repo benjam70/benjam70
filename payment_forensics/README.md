@@ -86,6 +86,10 @@ The understanding record also keeps separate `already_known`,
 `explicitly_requested`, and `still_unanswered` lists, plus amount, date,
 refund-ID, ARN, and order-ID slots. Optional thread history preserves the
 original intent while allowing the current turn to be reclassified.
+`thread_digest` (from `payment_forensics.thread_digest`) lists facts already
+told to the merchant or to CS, plus `open_items`. Mode B/C drafts that
+restate already-told recipient facts are rejected by `validate_delta_output`
+unless they use a short reference cue.
 
 ## Drift and humanization controls
 
