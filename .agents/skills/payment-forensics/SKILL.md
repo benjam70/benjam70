@@ -90,7 +90,9 @@ A Snowflake PAT request for exactly this purpose was already filed and abandoned
 
 **If a Snowflake query, or any of the five project MCP tools, fails on access,** the error will say so plainly (missing personal access token, invalid API key, insufficient scope). Surface that failure as-is in Data Gaps ("Production Warehouse not accessible: no personal access token configured", "Zendesk not accessible: no API token configured") rather than retrying it, working around it silently, or describing the data as merely "unavailable" without saying why. This is the same rule the Source-Tag Rule already applies to everything else: an untagged, unverified claim is a gap, not a fact, and a tool failure is data about the investigation's limits, not noise to hide.
 
-**LOCATING AN ORDER WHEN NO ORDER ID IS GIVEN** — confirmed working method, learned from a real case (locating two Reformation orders from a cardholder statement with no order numbers). You have no tool that opens a GE Admin order page directly by ID; the actual order record only arrives when the analyst pastes it. Coralogix full-text search can still get you the candidate order ID first, then hand it back for confirmation, rather than trying to verify it yourself from log noise.
+**GE Admin MCP (`admin_get_order`, `admin_get_order_full`, `admin_focus_window`, `admin_import_live_session`): opt-in only — never call automatically.** These tools drive a visible Edge window and routinely open a new login/SSO tab. On every case, take Admin evidence from the analyst paste (`RAW COPY CASE CAPTURE` / order tabs) or ask them to paste Payments & FX / Refunds. Do **not** call any `admin_*` tool at case start, on logged-out retries, or to "just check Admin." Only call Admin MCP when the analyst explicitly asks (e.g. "pull Admin", "use Admin MCP", "log in and fetch the order"). If they do not ask, missing Admin detail is a Data Gap or a paste request, not a reason to launch the browser.
+
+**LOCATING AN ORDER WHEN NO ORDER ID IS GIVEN** — confirmed working method, learned from a real case (locating two Reformation orders from a cardholder statement with no order numbers). You have no default tool that opens a GE Admin order page by ID; the actual order record arrives when the analyst pastes it (or, only if they explicitly opt in, via Admin MCP above). Coralogix full-text search can still get you the candidate order ID first, then hand it back for confirmation, rather than trying to verify it yourself from log noise.
 
 - **Search on the shipping address or full name, not the email or the decimal amount.** Order-creation payloads mask the customer email as `[***]` for PII — an email-only search returns false-positive-looking hits (matches on unrelated JSON structure, not the redacted value) that look like real hits but aren't. A street address token (e.g. `Butterick`) or a full name string (e.g. `McVicar`) is not redacted and reliably surfaces the right `orderId` field nearby. Card last4 and merchant name are decent secondary tokens for the same reason.
 - **Don't search for exact decimal amounts.** Coralogix drops numeric tokens under 4 bytes from its index (confirmed via the engine's own `compileWarning`), so `360` or `1029.63` searched alone silently returns zero results whether or not the data exists. A negative amount search is not proof of absence, don't report it as one.
@@ -121,6 +123,8 @@ source_failures: explicit tool errors, timeouts, partial or truncated results
 negative_claims: claim, searched identifiers, authoritative source, window, proof level
 funds_location: customer bank, merchant settlement, Global-e balance, gateway pending,
                 reversed, refunded, held by dispute, or unknown
+                (free-text synonyms such as "not captured" coerce to unknown; do not invent
+                a new enum value in gate JSON)
 terminal_state: established or not established
 completion_gate: pass or reject with a specific reason
 ```
@@ -452,6 +456,17 @@ An order/customer is CONFIRMED only when an identifier (order number, PSP refere
 
 Stop after Mode A. Do NOT write a CS note or merchant email unless explicitly asked ("write the CS note", "draft the merchant email"). Finishing the investigation is not a request to write the follow-up.
 
+## TWO-LAYER DRAFTING (wording vs money movement)
+
+Use a two-layer pattern when the ask is natural-sounding Mode B/C prose. Do not put GLM (or any rewrite/style model) inside payment authorize, capture, refund, settle, or decline decisions.
+
+1. **Fact layer** — Mode A / engine / Coralogix evidence. Lock statuses, amounts, identifiers, and the Finding first.
+2. **Wording layer** — Mode B or Mode C only when asked. Rewrite for natural colleague or merchant voice without adding facts. A separate model may run this rewrite pass; it must not invent causes, next steps, or money-movement outcomes.
+
+**Wording stack (canonical order).** After the fact layer is locked: (1) draft from Mode A, (2) for Mode B read `MODE_B_VOICE.md` and apply contrastive preferred / less-preferred anchors, then apply `.agents/skills/automatic-humanizer/SKILL.md` (the contract skill for Mode B/C voice — keep the two host copies byte-identical), (3) optional extra polish with the installed `humanizer` skill (blader patterns) only if it still preserves every identifier, amount, date, and uncertainty, (4) run `python tools/dudley_mode_bc_check.py` before paste. HybridEngine injects a compact Mode B voice profile from `MODE_B_VOICE.md` into `voice_profile` and runs a mechanical polish pass plus the same Mode B/C gates in-process; chat hosts must still read `MODE_B_VOICE.md` and run the CLI check. Never let a wording pass invent Ops/warehouse next steps, money-movement outcomes, or "Finance will…" when the note is already to Finance.
+
+The useful bit is the two-layer pattern, not putting GLM inside payments.
+
 ---
 
 ## WHO WE WRITE TO (there are only two audiences — never a customer)
@@ -484,15 +499,25 @@ Before drafting Mode B or Mode C output, state in one line what remains unresolv
 
 Internal note to a colleague on the CS/Finance Bridge team, drawn from the Mode A investigation. Walk through what happened to the money in order, where things stand now, and what needs to happen next. Short sentences, plain words, colleague register. No bullet points, no dashes of any kind. State the conclusion, the evidence behind it, any contradiction, the confidence level, and the concrete next action. No headers unless the case is genuinely complex. Never invent phrases like "we have reached out to" or "once we hear back."
 
-### THREAD DIGEST (mandatory before Mode B or Mode C)
+**Audience scope (Mode B).** The note is *to* Finance/CS. Do not say "Finance will…"; state the next action directly. Do not invent Ops, warehouse, shipping, or Bermuda next steps unless the current ask explicitly requires that owner. Answer only the Finance/CS open item.
+
+### THREAD DIGEST (mandatory before Mode B or Mode C) — HARD RULE
 
 Before drafting Mode B or Mode C, build a thread digest from the full ticket (and any pasted prior tickets in the capture). Record three lists:
 
-1. **Already told to this recipient** — facts a prior outbound message already gave the same audience (merchant for Mode C, CS/Finance for Mode B).
+1. **Already told to this recipient** — facts a prior outbound message already gave the same audience (merchant for Mode C, CS/Finance for Mode B). For Mode C, also treat facts the merchant themselves stated as already known to them (amounts, dates, dispute IDs, "refund processed / dispute closed"). Do not open by restating their ask or their own figures.
 2. **Open items** — what the latest ask still needs that those prior messages did not settle.
 3. **Current ask** — the one question this draft must answer.
 
-Draft only against **open items**. Do not restate an already-told fact in full. A half-sentence reference is allowed ("Update on the chargeback already flagged"). HybridEngine enforces this mechanically via `payment_forensics.thread_digest.validate_delta_output` when thread history is supplied; hosts without the engine still follow this digest step from the skill text. The `.claude/skills/thread-context` skill is the reading discipline that feeds the digest.
+**Hard rule, every Mode B/C draft:** answer only **open items**. Never restate an already-told fact, amount, status, or conclusion in full — not even to "set context." A half-sentence reference is allowed only with an explicit cue ("already flagged", "as noted"). If the draft could be understood after deleting every already-told sentence, delete those sentences before shipping. HybridEngine enforces this mechanically via `payment_forensics.thread_digest.validate_delta_output` when thread history is supplied (statuses **and** amounts); hosts without the engine still follow this digest step from the skill text and must run `python tools/dudley_mode_bc_check.py` when shell is available. The `.claude/skills/thread-context` skill is the reading discipline that feeds the digest.
+
+**Mandatory Mode B/C draft check, when shell access is available.** Before pasting Mode B or Mode C output, write a JSON payload matching the schema in `tools/dudley_mode_bc_check.py`'s docstring (`mode`, `current_ask`, `thread_history`, `draft`, optional `tier`), then run:
+
+```
+python tools/dudley_mode_bc_check.py <path to the JSON file>
+```
+
+`MODE_BC: PASS` means the draft clears thread-delta restatement, Finance/CS audience scope, banned words, gateway-name bans, sentence/word ceilings, and optional SlopScore/slop-check when installed. Only then output the draft. `MODE_BC: FAIL` lists the unmet lines; rewrite the draft and re-run before shipping. When no shell tool is available in this host, fall back to the THREAD DIGEST self-check above and say so if asked how the Mode B/C gate was checked.
 
 Never open a Mode B note with "for [name]" or address it to a colleague by name. It's an internal note dropped into the ticket, not a message to a person. Start with the finding, not a recipient.
 
@@ -508,20 +533,29 @@ Always output Mode B in a code block so it can be copied straight into Zendesk. 
 
 ## MODE B CALIBRATION (match this register exactly — never warmer, never stiffer)
 
-These are correct Mode B notes. This is the target:
+**Mandatory before drafting Mode B:** read `MODE_B_VOICE.md` at the repo root.
+That file is the voice-file + contrastive few-shot bank (preferred vs less-preferred
+anchors). Pick one preferred anchor closest in shape to the open item, one less-preferred
+near-miss, note what differs, then draft only the open-item delta in the preferred
+register. Do not copy subjects or amounts from the anchors. HybridEngine injects a
+compact profile from the same file into `voice_profile`; chat hosts must read the file.
+
+These are correct Mode B notes (same bank as `MODE_B_VOICE.md`). This is the target:
 
 "Refund for GE10760434362US completed on 03/01/2026 (ARN 15265676003000311389037). Don't reprocess, double refund risk. Confirm with the customer whether the refund appeared on their Mastercard statement. If not after 22 days, escalate to the issuing bank with the ARN to trace."
 
 "Checked the payment records and the internal refund log for GE12648359233NL. The S$88.95 refund went through on 07/07/2026, matches the internal refund record (ID 24507540), and there's a refund letter with the reference number. No gaps here."
 
+"No capture on this one. Payment never got past the 3DS challenge and the offer closed with no authorisation. Don't read Admin Paid Total under ChallengeRequired as a capture."
+
 "Order had an out-of-stock item removed before capture. The refund in GE Admin is a capture adjustment, not a real refund."
 
-Mechanical rules derived from these, not vibes:
+Mechanical rules derived from these and `MODE_B_VOICE.md`, not vibes:
 
-1. Human means plain and declarative. It never means jokey, warm, exclamatory, or chatty. If a rewrite adds words, warmth, or personality, it is wrong.
+1. Human means a colleague Zendesk note: plain, direct, contractions OK, trap named when it changes the next action. It never means jokey, warm, exclamatory, chatty, or padded. Sterile report voice ("It is confirmed that…", "It is recommended that…") is also wrong. Match preferred anchors; avoid less-preferred ones.
 2. Fold references into sentences. Never list ARN, date, or reference as separate lines at the end of a Mode B note. That reads as a data readout, not a colleague note.
 3. One conclusion, stated once. If it was said earlier in the ticket, reference it in half a sentence, don't restate it.
-4. When asked to sound more human, change register only. Word count must stay the same or shrink. Never compensate by adding.
+4. When asked to sound more human, change register only (opener, contractions, trap naming). Word count must stay the same or shrink. Never compensate by adding.
 5. Simple case, short note. If the agent just needs "refund was processed, ARN is X", that's the whole note.
 6. Retired openers, never use: "is confirmed, not stuck", "Update on" (when the recipient hasn't seen a prior version), and any opener that states "confirmed" twice.
 7. Never phrase anything dismissively about a customer, even internally. "The customer likely hasn't checked their statement" is fine. Anything that reads as eye-rolling isn't.
@@ -529,13 +563,32 @@ Mechanical rules derived from these, not vibes:
 
 ## MODE C — MERCHANT EMAIL (only when asked)
 
-An email to the merchant, not the shopper. Plain, professional, no payments jargon (no "lifecycle", "terminal state", "reconciliation", "authority", "settled", "PSP", and no gateway names: not Adyen, Stripe, PayPal, Klarna, or Worldpay). Explain what happened and what you need from them or what they should do. Don't overstate certainty. Sentences under 20 words. Understandable on first read. Keep consistent register throughout. If it starts formal, stay formal; don't switch between "they should" and "please" mid-message. Only evidenced facts. No implied causation, no forward-looking statements, no reasoning embedded in the text.
+Mode C is a **reply to the merchant's latest email**, not a case write-up and not a compressed Mode A. Before drafting, build `payment_forensics.email_reply_context` (speech act of the latest inbound, prior outbound facts, reply_shape, drafting_brief). Draft only against that brief. Greeting + answer + sign-off is the default when reply_shape is `short_clarification`.
+
+Plain, professional, no payments jargon (no "lifecycle", "terminal state", "reconciliation", "authority", "settled", "PSP", and no gateway names: not Adyen, Stripe, PayPal, Klarna, or Worldpay). Don't overstate certainty. Sentences under 20 words. Understandable on first read. Keep consistent register throughout. Only evidenced facts. No implied causation, no forward-looking promises, no investigation reasoning dumped into the email.
+
+**Reply test:** if the merchant only asked whether something is pending / whose favour / whether a refund landed, answer that question directly. Do not rebuild the prior outbound, invent a favour/funds lecture, or pad with dates and amounts already in the thread. A short clarifying reply is correct Mode C when that is what the email needs. A longer email is correct only when reply_shape is `status_update` or `first_substantive`.
 
 If a case involves a card chargeback being passed to the merchant, check the Fraud vs Service liability split (see CHARGEBACK LIABILITY above) before writing why. Don't tell a merchant a chargeback is theirs to bear without the reason code behind it, and don't apply that split to a PayPal or Klarna dispute.
 
-Never repeat a fact already stated to the merchant earlier in the thread. Add only what's new. Run the THREAD DIGEST step above first: Mode C content is the open-item delta for the merchant, not a full case recap.
+Never repeat a fact already stated to the merchant earlier in the thread, including amounts and "dispute closed / refund processed" lines. Add only what's new. Run the THREAD DIGEST hard rule above first. Thread digest blocks restatement; `email_reply_context` chooses the reply shape. Both run in `python tools/dudley_mode_bc_check.py` for Mode C.
 
-The banned-word list (see LENGTH AND STYLE) applies here too, including "we/our/us/team," which is a real constraint for a merchant email specifically: normal business correspondence defaults to first-person plural by habit. The fix is structural, not word-swapping: make the order, the record, or the event the subject of the sentence instead of "we." "Our records show no refund" becomes "No refund has been recorded." "We captured the payment" becomes "The payment was captured." This is the same evidence-first, cite-the-record principle from RULE 5 applied to sentence structure, not passive-voice hedging. Correct register: "Order GE33221100DEM shows one item marked cancelled on 07/02/2026. The full payment of 156.00 EUR was captured on 06/28/2026. No refund or adjustment has been recorded since. Please confirm whether this item shipped, or whether the customer needs a refund for it."
+The banned-word list (see LENGTH AND STYLE) applies here too, including "we/our/us/team," which is a real constraint for a merchant email specifically: normal business correspondence defaults to first-person plural by habit. The fix is structural, not word-swapping: make the order, the record, or the event the subject of the sentence instead of "we." "Our records show no refund" becomes "No refund has been recorded." "We captured the payment" becomes "The payment was captured." This is the same evidence-first, cite-the-record principle from RULE 5 applied to sentence structure, not passive-voice hedging.
+
+**Correct Mode C shapes:**
+
+Clarification reply (`short_clarification`):
+
+"Hi Shakeel,
+
+It is still Pending, so it's not a closed win for either side yet.
+
+Kind regards,
+Dylan"
+
+First substantive update (`first_substantive`):
+
+"Order GE33221100DEM shows one item marked cancelled on 07/02/2026. The full payment of 156.00 EUR was captured on 06/28/2026. No refund or adjustment has been recorded since. Please confirm whether this item shipped, or whether the customer needs a refund for it."
 
 Subject line goes above the code block as plain text. Body goes in a code block so it can be copied straight out. Nothing else outside the block.
 

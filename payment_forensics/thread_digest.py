@@ -22,7 +22,11 @@ _WORD_RE = re.compile(r"[A-Za-z0-9']+")
 _ORDER_RE = re.compile(r"\bGE\d{8,}[A-Z]{2}\b", re.I)
 _AMOUNT_RE = re.compile(
     r"(?<!\w)(?:GBP|EUR|USD|AUD|CAD|SGD|[£$€])\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b"
-    r"|\b\d{1,3}(?:,\d{3})*\.\d{2}\s?(?:GBP|EUR|USD|AUD|CAD|SGD)\b",
+    r"|\b\d{1,3}(?:,\d{3})*\.\d{2}\s?(?:GBP|EUR|USD|AUD|CAD|SGD)\b"
+    # Bare money-like decimals (merchant notes often omit the currency code).
+    # Excludes dot-separated dates (15.09.2026): a decimal immediately
+    # followed by another ".<digit>" is a date component, not an amount.
+    r"|\b\d{1,3}(?:,\d{3})*\.\d{2}\b(?!\.\d)",
     re.I,
 )
 _DATE_RE = re.compile(
@@ -41,7 +45,17 @@ _FACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bno refunds?(?:\s+\w+){0,4}\s+process", re.I), "no_refund_processed"),
     (re.compile(r"\bno\s+global-?e\s+refund\b", re.I), "no_refund_processed"),
     (re.compile(r"\bno\s+refund\s+(?:exists|has been|was)\b", re.I), "no_refund_processed"),
-    (re.compile(r"\brefundfailed\b|\brefund\s+failed\b", re.I), "refund_failed"),
+    (
+        re.compile(
+            r"\brefundfailed\b"
+            r"|\brefund\s+failed\b"
+            r"|\brefund\b(?:\s+\S+){0,8}\s+failed\b"
+            r"|\brefund\s+shows?\s+as\s+failed\b"
+            r"|\bshows?\s+as\s+failed\b",
+            re.I,
+        ),
+        "refund_failed",
+    ),
     (re.compile(r"\bthere is a chargeback\b|\ba chargeback for\b|\bchargeback for this\b", re.I), "chargeback_exists"),
     (re.compile(r"\bchargeback\b", re.I), "chargeback_exists"),
     (re.compile(r"\bchargeback\s+(?:was\s+)?reversed\b|\bchargebackreversed\b", re.I), "chargeback_reversed"),
@@ -51,6 +65,24 @@ _FACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bproof of refund\b|\brefund proof\b|\brefund letter\b", re.I), "refund_proof_request"),
     (re.compile(r"\barn\b", re.I), "arn_mentioned"),
     (re.compile(r"\bcaptured\b|\bauthori[sz]ed\b|\bsettled\b", re.I), "payment_lifecycle"),
+    (
+        re.compile(
+            r"\bdispute\s+(?:was\s+|is\s+)?closed\b"
+            r"|\bcase\s+(?:was\s+|is\s+)?closed\b"
+            r"|\bclosed\s+the\s+dispute\b",
+            re.I,
+        ),
+        "dispute_closed",
+    ),
+    (
+        re.compile(
+            r"\brefund\s+processed\b"
+            r"|\brefund\s+(?:has\s+been|was)\s+processed\b"
+            r"|\bprocessed,?\s+dispute\s+closed\b",
+            re.I,
+        ),
+        "refund_processed",
+    ),
 )
 
 _REFERENCE_CUES = re.compile(
@@ -111,7 +143,13 @@ class ThreadDigest:
 
     def fact_keys_for_recipient(self) -> set[str]:
         if self.recipient == "merchant":
-            source = self.already_told_merchant
+            source = list(self.already_told_merchant)
+            # Merchant already knows facts they themselves stated (their ask
+            # is not news to them). Count those as known so Mode C cannot
+            # restate "the refund failed" back as the opening finding.
+            source.extend(
+                fact for fact in self.established if fact.speaker_role == "merchant"
+            )
         else:
             source = self.already_told_internal
         keys: set[str] = set()
@@ -134,6 +172,8 @@ class ThreadDigest:
         if "answer latest ask" in joined:
             # Unknown delta: allow new outcome keys, still block pure restatement of closed statuses.
             keys.update({"chargeback_reversed", "dispute_pending", "second_chargeback_possible", "no_refund_processed"})
+        if "favour" in joined or "whose-side" in joined:
+            keys.update({"dispute_pending", "second_chargeback_possible"})
         return keys
 
 
@@ -268,6 +308,7 @@ def _open_items_from_ask(ask: str, already_told: Iterable[ThreadFact]) -> list[s
 
     wants_refund_status = any(term in lowered for term in ("refund status", "confirm the status", "confirm refund", "has not received the funds", "refund is showing"))
     wants_chargeback_outcome = any(term in lowered for term in ("chargeback outcome", "confirm chargeback", "still open", "dispute status", "advise further"))
+    wants_favour = bool(re.search(r"\bfavou?r\b", lowered))
     wants_proof = any(term in lowered for term in ("proof of refund", "refund proof", "refund letter", "attach a screenshot"))
     wants_arn = "arn" in lowered
 
@@ -277,6 +318,8 @@ def _open_items_from_ask(ask: str, already_told: Iterable[ThreadFact]) -> list[s
         # Status already told; only reopen if ask is specifically about funds not arriving despite portal
         if "not received" in lowered or "showing as processed" in lowered:
             items.append("clarify portal refund view vs no payout")
+    if wants_favour:
+        items.append("answer favour / whose-side question")
     if wants_chargeback_outcome:
         if "chargeback_reversed" not in told_keys and "dispute_pending" not in told_keys:
             items.append("chargeback outcome still open")
@@ -286,9 +329,54 @@ def _open_items_from_ask(ask: str, already_told: Iterable[ThreadFact]) -> list[s
         items.append("refund proof still open")
     if wants_arn and "arn_mentioned" not in told_keys:
         items.append("ARN still open")
-    if not items and ("refund" in lowered or "chargeback" in lowered or "dispute" in lowered):
+    if not items and ("refund" in lowered or "chargeback" in lowered or "dispute" in lowered or "favou" in lowered):
         items.append("answer latest ask only")
     return items
+
+
+_FINANCE_AS_THIRD_PARTY = re.compile(
+    r"\bfinance\s+(?:will|should|needs?\s+to|must|to)\b",
+    re.I,
+)
+_OPS_OWNER = re.compile(
+    r"\b(?:ops|operations|warehouse|shipping|bermuda|fulfillment|fulfilment)\b"
+    r".{0,50}\b(?:will|should|need to|needs to|must|to)\b"
+    r"|\b(?:escalate|send|hand|route|pass)\b.{0,40}\b(?:ops|operations|warehouse|bermuda|shipping)\b"
+    r"|\b(?:ops|operations|warehouse|bermuda)\b.{0,40}\b(?:to\s+)?(?:confirm|check|action|handle)\b",
+    re.I,
+)
+_ASK_OPS = re.compile(r"\b(?:ops|operations|warehouse|bermuda|shipping|fulfillment|fulfilment)\b", re.I)
+
+
+def validate_audience_scope(
+    mode: str,
+    text: str,
+    current_ask: str = "",
+) -> tuple[str, ...]:
+    """Reject Mode B drafts that invent the wrong owner for the next step.
+
+    Mode B is a note *to* CS/Finance. Saying "Finance will…" treats Finance as
+    a third party. Inventing Ops/warehouse/bermuda next steps when the ask did
+    not mention them is the same class of scope creep.
+    """
+    normalized_mode = str(mode or "").upper()
+    if normalized_mode != "B":
+        return ()
+    body = str(text or "")
+    if not body.strip():
+        return ()
+    reasons: list[str] = []
+    if _FINANCE_AS_THIRD_PARTY.search(body):
+        reasons.append(
+            "audience scope: Mode B is for Finance/CS — do not say 'Finance will…'; "
+            "state the next action directly"
+        )
+    ask = str(current_ask or "")
+    if not _ASK_OPS.search(ask) and _OPS_OWNER.search(body):
+        reasons.append(
+            "audience scope: draft invents Ops/warehouse next steps outside the Finance ask"
+        )
+    return tuple(reasons)
 
 
 def validate_delta_output(mode: str, text: str, digest: ThreadDigest) -> tuple[str, ...]:
@@ -303,9 +391,11 @@ def validate_delta_output(mode: str, text: str, digest: ThreadDigest) -> tuple[s
     if not told:
         return ()
     allowed = digest.open_fact_keys() | {key for key in told if key.startswith("order:")}
-    # Order IDs alone are fine; status restatements are not.
-    status_told = {key for key in told if not key.startswith("order:") and not key.startswith("amount:")}
-    if not status_told:
+    # Order IDs alone are fine. Statuses AND amounts already told to this
+    # recipient are not: Mode B/C must not replay merchant-stated figures or
+    # prior "dispute closed / refund processed" lines.
+    checkable_told = {key for key in told if not key.startswith("order:")}
+    if not checkable_told:
         return ()
 
     restated: list[str] = []
@@ -313,16 +403,20 @@ def validate_delta_output(mode: str, text: str, digest: ThreadDigest) -> tuple[s
         if _is_reference_sentence(sentence):
             continue
         keys = set(extract_fact_keys(sentence))
-        overlap = (keys & status_told) - allowed
+        overlap = (keys & checkable_told) - allowed
         # Outcome-specific keys supersede the generic "chargeback exists" restatement.
         if keys & {"chargeback_reversed", "dispute_pending", "second_chargeback_possible", "pre_arbitration"}:
             overlap.discard("chargeback_exists")
+        # A new settlement amount may sit beside a half-sentence pointer; still
+        # block bare replay of known amounts without a reference cue.
         if not overlap:
             continue
         words = _WORD_RE.findall(sentence)
         # Short pointers with a cue already handled; long overlap without cue = restatement
         if len(words) >= 8 and overlap:
             restated.extend(sorted(overlap))
+        elif overlap and any(key.startswith("amount:") for key in overlap) and len(words) >= 5:
+            restated.extend(sorted(key for key in overlap if key.startswith("amount:")))
 
     unique = tuple(dict.fromkeys(restated))
     if unique:
