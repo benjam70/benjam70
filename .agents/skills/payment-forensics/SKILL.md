@@ -320,7 +320,8 @@ Universal events: Authorisation | Capture | Settlement | Refund | Chargeback | R
 | tabby | `tabbyStatus: AutherizationFailed` (sic) | Authorisation failure, not a success case |
 | tabby | Successful Authorisation / Capture / Refund / Chargeback | AMBIGUOUS — DATA GAP, only negative/no-op statuses confirmed so far, see the tabby tool-grounding note above |
 | PayJustNow | `checkoutPaymentStatus: PAID_PENDING_CALLBACK` / `OperationType: Settle` | Authorisation / Capture-Settlement |
-| PayJustNow | Refund / Chargeback | AMBIGUOUS — DATA GAP, refund not spot-checked (query error), chargeback pipeline confirmed wired but no live example, see the PayJustNow tool-grounding note above |
+| PayJustNow | `OperationType: Refund` (capital O, confirmed via the schema field catalog) | Refund |
+| PayJustNow | Chargeback | AMBIGUOUS — DATA GAP, pipeline confirmed wired but no live example, see the PayJustNow tool-grounding note above |
 | NewebPay | `PublishCaptureCompletedQueueMessage` (via PSPNotificationHandler, userAgent `pay2go`) | Capture, refund support confirmed available (`IsRefundSupported: True`) |
 | NewebPay | Refund event / Chargeback | AMBIGUOUS — DATA GAP, refund support flag confirmed but no refund event itself spot-checked, chargeback wiring genuinely unchecked (not confirmed absent), see the NewebPay tool-grounding note above |
 | Mondu | `MonduController.HandleNotification` webhook (Authorised → Settled) | Authorisation / Settlement, confirmed webhook is the only trustworthy source, not the redirect |
