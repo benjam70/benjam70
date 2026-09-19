@@ -39,10 +39,15 @@ import json
 import os
 import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 API_KEY = os.environ.get("CORALOGIX_API_KEY", "")
 DOMAIN = os.environ.get("CORALOGIX_DOMAIN", "")
@@ -230,6 +235,147 @@ async def coralogix_search_fields(
         return json.dumps(json.loads(stdout.decode(errors="replace")), indent=2)
     except json.JSONDecodeError:
         return json.dumps({"error": "cx returned non-JSON output", "raw": stdout.decode(errors="replace")}, indent=2)
+
+
+@mcp.tool()
+async def coralogix_fuzzy_correct(
+    term: str,
+    candidates: list[str],
+    limit: int = 5,
+    score_cutoff: float = 60.0,
+) -> str:
+    """Rank real Coralogix field values by true edit-distance similarity to `term`.
+
+    Coralogix's own "fuzzy" search (`$d ~~ 'term'` / `wildfind`) is plain
+    substring matching, not edit-distance tolerant, confirmed against
+    Coralogix's own docs and live testing: a correctly-spelled value
+    matches, a deliberately misspelled string with no real match returns
+    zero. There is no server-side typo-tolerant search here. This tool
+    closes that gap locally: give it a term you suspect might be
+    misspelled and a list of real candidate values already pulled from
+    Coralogix (the `examples` column of a `system/engine.schema_fields`
+    row, or a `coralogix_search_fields` value-mode result), and it ranks
+    those candidates by actual edit distance instead of a substring guess.
+
+    term: the search term you're not fully sure is spelled correctly.
+    candidates: real field values already retrieved from Coralogix, not
+      guesses, this tool only re-ranks what you already have.
+    limit: max ranked matches to return (default 5).
+    score_cutoff: drop matches scoring below this (0-100, default 60).
+
+    Returns a JSON list of {value, score}, best match first, or an empty
+    list if nothing in `candidates` is close enough.
+    """
+    from payment_forensics.coralogix_fuzzy import rank_similar
+
+    try:
+        matches = rank_similar(term, candidates, limit=limit, score_cutoff=score_cutoff)
+    except RuntimeError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+    return json.dumps([{"value": m.value, "score": m.score} for m in matches], indent=2)
+
+
+@mcp.tool()
+async def coralogix_mine_templates(
+    log_lines: list[str],
+    noise_size_threshold: int = 1,
+) -> str:
+    """Cluster raw Coralogix log lines by structural shape to separate real events from noise.
+
+    A genuine PSP webhook event recurs across many orders in a recognizable
+    shape (same wording, different order ID/amount/status). A coincidental
+    keyword hit is usually a one-off with a completely different shape.
+    This has caught real, documented false positives before: Revolut
+    matched unrelated Stripe records, tabby's capitalization mismatch hid
+    real data, and Amazon Pay matched an internal code-review bot's log
+    that happened to mention the same class/method names as example code.
+    Clustering the raw log message lines from a broad search turns
+    "does this look real" into "did this line land in a cluster with
+    others, or is it alone" instead of manually re-verifying each hit.
+
+    Also useful for a not-yet-investigated gateway: pull a broad sample of
+    raw log lines for its route and mine templates directly, seeing the
+    actual recurring message shapes and their variable fields at once,
+    instead of testing field-name guesses one at a time.
+
+    log_lines: raw log message text already pulled from Coralogix (e.g.
+      the `message`/`Message` field from a `coralogix_query_dataprime`
+      result), not full JSON rows. This does not query Coralogix itself.
+    noise_size_threshold: a cluster with this many members or fewer is
+      flagged likely_noise (default 1: a line with no structural match
+      anywhere else in the batch, verify it against the real field before
+      trusting it as evidence).
+
+    Returns a JSON list of clusters, largest first, each with cluster_id,
+    size, the mined template (variable parts masked), a real example
+    line, and likely_noise.
+    """
+    from payment_forensics.coralogix_templates import mine_templates
+
+    try:
+        clusters = mine_templates(log_lines, noise_size_threshold=noise_size_threshold)
+    except RuntimeError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+    return json.dumps(
+        [
+            {
+                "cluster_id": c.cluster_id,
+                "size": c.size,
+                "template": c.template,
+                "example": c.example,
+                "likely_noise": c.likely_noise,
+            }
+            for c in clusters
+        ],
+        indent=2,
+    )
+
+
+@mcp.tool()
+async def coralogix_infer_schema(
+    payloads: list[str],
+    sample_limit: int = 50,
+) -> str:
+    """Merge a batch of raw JSON payloads to see a gateway's real fields at once.
+
+    Several gateways here log the full raw webhook JSON body (Stripe,
+    Checkout.com, PayJustNow). Understanding a new or not-yet-investigated
+    gateway has so far meant reading a handful of pasted example payloads
+    by hand: which fields exist, which only appear on certain event types
+    (a refund confirmation carrying `refundAmount` an auth confirmation
+    never has), which fields are always there. This tool automates that
+    read: give it a batch of raw JSON payloads already pulled from
+    Coralogix, and it merges them and separates fields present in every
+    sample from fields that only show up on some of them.
+
+    payloads: raw JSON payload text already pulled from Coralogix (the
+      parsed log body, not the free-text message, see
+      coralogix_mine_templates for that). Entries that aren't valid JSON
+      objects are skipped, not errored on.
+    sample_limit: max payloads to merge (default 50).
+
+    Returns a JSON list of {name, types, always_present, example}, always-
+    present fields first, or an empty list if nothing parsed as an object.
+    """
+    from payment_forensics.coralogix_json_schema import summarize_fields
+
+    try:
+        fields = summarize_fields(payloads, sample_limit=sample_limit)
+    except RuntimeError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+    return json.dumps(
+        [
+            {
+                "name": f.name,
+                "types": list(f.types),
+                "always_present": f.always_present,
+                "example": f.example,
+            }
+            for f in fields
+        ],
+        indent=2,
+        default=str,
+    )
 
 
 if __name__ == "__main__":

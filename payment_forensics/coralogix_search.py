@@ -20,7 +20,27 @@ class QueryQuality:
     reasons: tuple[str, ...] = ()
 
 
+_FUZZY_TILDE_RE = re.compile(r"~~")
+_LUCENE_FUZZY_SUFFIX_RE = re.compile(r'''["']?\w+["']?~\d*(?=\s|\)|"|'|$)''')
+_COMPOUND_NEGATED_REGEX_RE = re.compile(r"(?:\|\||&&).*!~|!~.*(?:\|\||&&)")
+_GE_CORRELATION_ID_RE = re.compile(r"\bGECorrelationId\b", re.I)
+_NESTED_DOTTED_PATH_RE = re.compile(r"\$d\.\w+\.\w+")
+_NEO_SOURCE_RE = re.compile(r"\bneo\b", re.I)
+
+
 def assess_query(request: SearchRequest) -> QueryQuality:
+    is_coralogix_source = request.source.casefold() == "coralogix" or "coralogix" in request.source.casefold()
+    if is_coralogix_source and _NEO_SOURCE_RE.search(request.source):
+        return QueryQuality(
+            0,
+            False,
+            (
+                "Neo-routed Coralogix search is banned here: confirmed to return a "
+                "false empty result on a real case that the direct connector answered "
+                "immediately on the identical query and window; use the direct "
+                "Coralogix connector instead",
+            ),
+        )
     if request.source.casefold() != "coralogix":
         return QueryQuality(100, True)
     reasons: list[str] = []
@@ -38,7 +58,38 @@ def assess_query(request: SearchRequest) -> QueryQuality:
     if re.search(r"\b(?:refund|capture|authori[sz]ation|cancel|chargeback|payment)\b", query, re.I) is None:
         score -= 10
         reasons.append("query has no payment-event term")
-    return QueryQuality(score, score >= 50, tuple(reasons))
+    if _FUZZY_TILDE_RE.search(query):
+        score -= 30
+        reasons.append(
+            "fuzzy operator ~~ is unsupported here (it's plain substring matching, "
+            "not edit-distance tolerant); use coralogix_search_fields to find the "
+            "real spelling instead of a fuzzy guess"
+        )
+    if request.query_language == "lucene" and _LUCENE_FUZZY_SUFFIX_RE.search(query):
+        score -= 30
+        reasons.append(
+            "lucene's native fuzzy suffix (term~, term~1) returns a hard 400 here; "
+            "drop the suffix and match the exact term"
+        )
+    if _COMPOUND_NEGATED_REGEX_RE.search(query):
+        score -= 25
+        reasons.append(
+            "a compound filter mixing ||/&& with a negated regex (!~) returns a hard "
+            "400; split into two plain single-condition filters instead"
+        )
+    if _GE_CORRELATION_ID_RE.search(query):
+        score -= 15
+        reasons.append(
+            "GECorrelationId is a batch-job run ID spanning many unrelated orders, "
+            "not a per-order correlation key; use entityId instead"
+        )
+    if _NESTED_DOTTED_PATH_RE.search(query):
+        reasons.append(
+            "nested dotted path into the JSON body (e.g. $d.userData.foo) fails "
+            "silently on a wrong guess (zero rows, no error); confirm the path via "
+            "coralogix_search_fields first"
+        )
+    return QueryQuality(max(score, 0), score >= 50, tuple(reasons))
 
 
 def time_sliced_queries(request: SearchRequest, *, max_slices: int = 12) -> tuple[SearchRequest, ...]:

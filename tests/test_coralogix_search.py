@@ -40,6 +40,63 @@ class CoralogixSearchTests(unittest.TestCase):
         self.assertFalse(quality.allowed)
         self.assertIn("archive or coverage gap reported", quality.reasons)
 
+    def test_fuzzy_double_tilde_is_flagged(self):
+        request = SearchRequest("Coralogix", "source logs | filter $d ~~ 'refnd'", ("GE-1",), "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+        quality = assess_query(request)
+        self.assertTrue(any("fuzzy operator ~~" in reason for reason in quality.reasons))
+
+    def test_lucene_fuzzy_suffix_is_flagged(self):
+        request = SearchRequest(
+            "Coralogix",
+            'source logs | lucene \'finalTransactionStatus:refund~1\'',
+            ("GE-1",),
+            "2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            query_language="lucene",
+        )
+        quality = assess_query(request)
+        self.assertTrue(any("hard 400" in reason for reason in quality.reasons))
+
+    def test_compound_negated_regex_is_flagged(self):
+        request = SearchRequest(
+            "Coralogix",
+            "source logs payment | filter status == 'x' || reason !~ 'y'",
+            ("GE-1",),
+            "2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+        )
+        quality = assess_query(request)
+        self.assertTrue(any("compound filter" in reason for reason in quality.reasons))
+
+    def test_ge_correlation_id_is_flagged(self):
+        request = SearchRequest(
+            "Coralogix",
+            "source logs payment | filter GECorrelationId == 'GE1'",
+            ("GE-1",),
+            "2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+        )
+        quality = assess_query(request)
+        self.assertTrue(any("batch-job run ID" in reason for reason in quality.reasons))
+
+    def test_nested_dotted_path_is_flagged_as_advisory(self):
+        request = SearchRequest(
+            "Coralogix",
+            "source logs payment | filter $d.userData.refund == 'x'",
+            ("GE-1",),
+            "2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+        )
+        quality = assess_query(request)
+        self.assertTrue(any("fails silently" in reason for reason in quality.reasons))
+
+    def test_neo_source_is_hard_rejected(self):
+        request = SearchRequest("Coralogix via Neo", "source logs | filter $d ~ 'GE-1'", ("GE-1",), "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+        quality = assess_query(request)
+        self.assertFalse(quality.allowed)
+        self.assertEqual(quality.score, 0)
+        self.assertTrue(any("Neo-routed" in reason for reason in quality.reasons))
+
     def test_provider_warning_is_not_accepted_as_checked_coverage(self):
         result = ToolResult(
             "Coralogix",

@@ -1,2 +1,13 @@
 mcp==1.9.4
 httpx>=0.27
+# For coralogix/server.py's coralogix_fuzzy_correct tool: real edit-distance
+# matching, since Coralogix's own "fuzzy" search is plain substring matching.
+rapidfuzz>=3.14
+# For coralogix/server.py's coralogix_mine_templates tool: clusters raw log
+# lines by structural shape to separate real recurring PSP events from
+# one-off keyword-match noise (see payment_forensics/coralogix_templates.py).
+drain3>=0.9.11
+# For coralogix/server.py's coralogix_infer_schema tool: merges a batch of
+# raw JSON webhook payloads to separate always-present fields from
+# event-specific ones (see payment_forensics/coralogix_json_schema.py).
+genson>=1.4
