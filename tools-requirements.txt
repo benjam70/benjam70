@@ -1,0 +1,12 @@
+# Optional dependency for tools/query_coralogix_dump.py and
+# payment_forensics/coralogix_dump_query.py: queries a saved Coralogix
+# result dump with real SQL instead of grepping escaped JSON. The core
+# engine works without it; investigators fall back to targeted queries
+# and grep on the saved file.
+duckdb>=1.5
+# Optional dependency for payment_forensics/timestamp_normalize.py:
+# normalizes mixed-source timestamps to UTC per RULE 1.6, without the
+# silent day/month or GMT-offset-sign misparses dateutil's own automatic
+# handling produces on some real formats (both confirmed live). Without
+# it, normalize timestamps by hand per RULE 1.6.
+python-dateutil>=2.9
